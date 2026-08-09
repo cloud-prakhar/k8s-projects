@@ -1,0 +1,31 @@
+# clusters/kind-ingress.yaml
+# WHY: Ingress on a laptop needs the host's port 80/443 mapped into the node
+#      container. This CANNOT be added after the cluster is created — it is a
+#      node-creation setting. Forgetting it is why "my Ingress does nothing".
+#
+# Create:  kind create cluster --name kubernetes-lab --config clusters/kind-ingress.yaml
+# Then:    install the NGINX Ingress Controller — see docs/local-vs-cloud.md §4
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubernetes-lab
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # Label the node so the ingress-nginx Kind manifest (which uses a
+      # nodeSelector on this label) will schedule the controller here.
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # host localhost:80 -> node:80 -> ingress controller hostPort
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+  # A worker so application pods and the ingress controller can live apart,
+  # which makes the traffic path realistic rather than all-on-one-node.
+  - role: worker

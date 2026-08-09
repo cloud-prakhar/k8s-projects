@@ -1,0 +1,99 @@
+# 11-health-checks/task-api-deployment.yaml
+# WHY: A container that is "Running" is not necessarily able to serve traffic,
+#      and a container that is stuck is not necessarily dead. Kubernetes cannot
+#      know either without asking. Probes are how it asks.
+#
+#   readinessProbe — "should I send you traffic?"   fail => removed from Service endpoints (NOT restarted)
+#   livenessProbe  — "are you still working?"       fail => container RESTARTED
+#   startupProbe   — "have you finished booting?"   protects slow starters from the liveness probe
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task API backend — health-probed, zero-downtime rollouts"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-api
+      app.kubernetes.io/instance: task-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      # maxUnavailable: 0 is only MEANINGFUL with a readiness probe. Without one
+      # a Pod counts as "available" the instant it is Running, so the rollout
+      # advances before the new Pod can serve anything.
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-api
+        app.kubernetes.io/instance: task-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      # Give the app time to finish in-flight requests after SIGTERM.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: task-api
+          image: task-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: task-tracker-config
+          env:
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: task-api-secret
+                  key: API_TOKEN
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # STARTUP: until this succeeds, readiness and liveness are suspended.
+          # Budget = failureThreshold × periodSeconds = 30 × 1s = 30s to boot.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http          # reference the NAMED port, not a number
+            periodSeconds: 1
+            failureThreshold: 30
+
+          # READINESS: gates Service traffic. Checked continuously, not once.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3   # ~15s of failures before traffic is withdrawn
+
+          # LIVENESS: restarts the container. Be conservative — an aggressive
+          # liveness probe turns a slow dependency into a restart storm.
+          # NOTE it points at /livez, NOT /healthz. Pointing liveness at a
+          # readiness endpoint means "temporarily busy" gets punished with a kill.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3

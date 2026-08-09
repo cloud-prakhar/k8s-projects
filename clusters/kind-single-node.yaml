@@ -1,0 +1,15 @@
+# clusters/kind-single-node.yaml
+# WHY: The smallest possible cluster. Used by Project 01, where the lesson is
+#      workloads and Services — nodes and scheduling are a distraction.
+#
+# Create:  kind create cluster --name kubernetes-lab --config clusters/kind-single-node.yaml
+# Verify:  kubectl get nodes
+# Delete:  kind delete cluster --name kubernetes-lab
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubernetes-lab
+nodes:
+  # A single node that is BOTH control-plane and worker. Kind removes the
+  # usual control-plane NoSchedule taint on single-node clusters, so your
+  # pods can actually run here.
+  - role: control-plane

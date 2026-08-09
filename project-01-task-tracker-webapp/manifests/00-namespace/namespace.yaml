@@ -1,0 +1,15 @@
+# 00-namespace/namespace.yaml
+# WHY: Without a namespace every object lands in "default", mixed with everything
+#      else on the cluster. Cleanup becomes "delete these 14 things individually
+#      and hope you didn't miss one" instead of "delete the namespace".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: task-tracker
+  labels:
+    app.kubernetes.io/name: task-tracker
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    kubernetes.io/description: "Project 01 — Task Tracker web application"
+    lab.k8s-project/stage: "00-namespace"

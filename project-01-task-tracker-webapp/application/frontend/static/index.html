@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Task Tracker — Kubernetes Project Lab</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; gap: .5rem; margin: 1.5rem 0; }
+  input { flex: 1; padding: .55rem .7rem; border: 1px solid #94a3b8; border-radius: 6px; font: inherit; }
+  button { padding: .55rem .9rem; border: 0; border-radius: 6px; background: #4f46e5; color: #fff; font: inherit; cursor: pointer; }
+  li { display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid #cbd5e1; }
+  ul { list-style: none; padding: 0; }
+  .del { background: none; color: #dc2626; }
+  #meta { margin-top: 2rem; padding: .75rem; border-radius: 6px; background: #f1f5f9; color: #0f172a; font: .8rem ui-monospace, monospace; white-space: pre-wrap; }
+  #err { color: #dc2626; font: .85rem ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+
+<h1>📋 Task Tracker</h1>
+<form id="f"><input id="t" placeholder="What needs doing?" autocomplete="off"><button>Add</button></form>
+<ul id="list"></ul>
+<div id="err"></div>
+<!-- Shows WHICH backend pod answered. Refresh a few times once there are
+     multiple replicas behind a Service and watch the name change. -->
+<div id="meta">loading…</div>
+
+<script>
+const api = "/api/tasks", err = document.getElementById("err");
+
+async function load() {
+  err.textContent = "";
+  try {
+    const r = await fetch(api);
+    if (!r.ok) throw new Error(`API returned ${r.status}`);
+    const tasks = await r.json();
+    document.getElementById("list").innerHTML = tasks.map(t =>
+      `<li><span>${t.title}</span><button class="del" onclick="del(${t.id})">delete</button></li>`
+    ).join("") || "<li><em>no tasks yet</em></li>";
+  } catch (e) { err.textContent = "Cannot reach the API: " + e.message; }
+  try {
+    const i = await (await fetch("/api/info")).json();
+    document.getElementById("meta").textContent =
+      `served by pod : ${i.pod}\nAPP_ENV       : ${i.app_env}\nLOG_LEVEL     : ${i.log_level}\nauth enabled  : ${i.auth_enabled}`;
+  } catch { document.getElementById("meta").textContent = "backend info unavailable"; }
+}
+async function del(id) { await fetch(`${api}?id=${id}`, { method: "DELETE" }); load(); }
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const t = document.getElementById("t");
+  if (!t.value.trim()) return;
+  await fetch(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: t.value }) });
+  t.value = ""; load();
+};
+load(); setInterval(load, 5000);
+</script>

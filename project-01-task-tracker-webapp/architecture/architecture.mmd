@@ -1,0 +1,65 @@
+%% Project 01 — Task Tracker — Low-Level Design (LLD)
+%% Source of truth for the "Kubernetes Architecture" diagram in README.md §7.
+%% Palette fixed repo-wide — see docs/CONVENTIONS.md §6.1.
+%%   solid arrow  = traffic or controller ownership
+%%   dotted arrow = reference / injection / gating
+flowchart TB
+    U["👤 User<br/>kubectl port-forward"]:::external
+
+    subgraph NS["📦 Namespace: task-tracker"]
+        direction TB
+
+        SVCW["Service/task-web<br/>ClusterIP :80 → http"]:::network
+        EPSW["EndpointSlice/task-web-…<br/>ready web Pod IPs"]:::network
+        DEPW["Deployment/task-web<br/>replicas: 2 · maxUnavailable: 0"]:::workload
+        RSW["ReplicaSet/task-web-5c8b"]:::workload
+        PW1["Pod/task-web-…-a1"]:::pod
+        PW2["Pod/task-web-…-b2"]:::pod
+
+        SVCA["Service/task-api<br/>ClusterIP :8080 → http"]:::network
+        EPSA["EndpointSlice/task-api-…<br/>ready API Pod IPs"]:::network
+        DEPA["Deployment/task-api<br/>replicas: 3 · maxUnavailable: 0"]:::workload
+        RSA["ReplicaSet/task-api-6d4f"]:::workload
+        RSOLD["ReplicaSet/task-api-59ab<br/>replicas: 0 · rollback target"]:::workload
+        PA1["Pod/task-api-…-x1"]:::pod
+        PA2["Pod/task-api-…-y2"]:::pod
+        PA3["Pod/task-api-…-z3"]:::pod
+
+        CM["ConfigMap/task-tracker-config<br/>APP_ENV · LOG_LEVEL · TASK_API_URL"]:::config
+        SEC["Secret/task-api-secret<br/>API_TOKEN"]:::config
+
+        KUBELET["kubelet probes<br/>startup · readiness · liveness"]:::observe
+    end
+
+    U --> SVCW
+    SVCW --> EPSW
+    EPSW --> PW1
+    EPSW --> PW2
+    DEPW --> RSW
+    RSW --> PW1
+    RSW --> PW2
+
+    PW1 -->|"TASK_API_URL"| SVCA
+    PW2 --> SVCA
+    SVCA --> EPSA
+    EPSA --> PA1
+    EPSA --> PA2
+    EPSA --> PA3
+    DEPA --> RSA
+    RSA --> PA1
+    RSA --> PA2
+    RSA --> PA3
+    DEPA -.->|"kept for rollback"| RSOLD
+
+    CM -.->|"envFrom"| PA1
+    CM -.->|"configMapKeyRef"| PW1
+    SEC -.->|"secretKeyRef"| PA1
+    SEC -.->|"secretKeyRef"| PW1
+    KUBELET -.->|"readiness gates membership"| EPSA
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef observe  fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#134e4a

@@ -1,0 +1,24 @@
+# 05-configmaps/configmap.yaml
+# WHY: Configuration is currently spread across two Deployment manifests. To
+#      change the log level you edit a workload spec and trigger a rollout of
+#      the application itself. A ConfigMap separates configuration from both the
+#      image and the workload definition.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-tracker-config
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-tracker-config
+    app.kubernetes.io/instance: task-tracker-config
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Non-sensitive configuration shared by the web and API tiers"
+    lab.k8s-project/stage: "05-configmaps"
+# `data` holds UTF-8 string key/values. (Binary goes in `binaryData`.)
+# Nothing here is secret — a ConfigMap offers NO protection whatsoever.
+data:
+  APP_ENV: "development"
+  LOG_LEVEL: "info"
+  TASK_API_URL: "http://task-api.task-tracker.svc.cluster.local:8080"

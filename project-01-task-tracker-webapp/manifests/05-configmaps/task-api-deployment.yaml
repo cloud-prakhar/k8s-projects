@@ -1,0 +1,63 @@
+# 05-configmaps/task-api-deployment.yaml
+# WHAT CHANGED: the hardcoded APP_ENV literal is gone. Values now come from the
+#               ConfigMap. The image is untouched — only the wiring changed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task API backend — configuration externalised to a ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-api
+      app.kubernetes.io/instance: task-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-api
+        app.kubernetes.io/instance: task-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: task-api
+          image: task-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Pick individual keys. `optional: false` (the default) means the
+            # Pod refuses to start if the key is missing — a hard dependency,
+            # which is usually what you want for required configuration.
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: task-tracker-config
+                  key: APP_ENV
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: task-tracker-config
+                  key: LOG_LEVEL
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

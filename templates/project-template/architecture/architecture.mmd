@@ -1,0 +1,73 @@
+%% Project XX — Low-Level Design (LLD)
+%% Source of truth for the "Kubernetes Architecture" diagram in README.md §7.
+%% Palette is fixed repo-wide — see docs/CONVENTIONS.md §6.1. Do not invent colors.
+%%   solid arrow  = traffic or controller ownership
+%%   dotted arrow = reference / mount / scaling relationship
+%%   node label   = Kind/name on line 1, key spec on line 2
+
+flowchart TB
+    U["👤 User<br/>Browser"]:::external
+
+    subgraph NS["📦 Namespace: &lt;namespace&gt;"]
+        direction TB
+
+        %% --- external entry ---
+        ING["Ingress/&lt;name&gt;<br/>host: &lt;host&gt;"]:::gateway
+
+        %% --- networking ---
+        SVC["Service/&lt;name&gt;<br/>ClusterIP :80 → http"]:::network
+        EPS["EndpointSlice/&lt;name&gt;<br/>&lt;pod IPs&gt;"]:::network
+
+        %% --- workload ---
+        DEP["Deployment/&lt;name&gt;<br/>replicas: N"]:::workload
+        RS["ReplicaSet/&lt;name&gt;-&lt;hash&gt;"]:::workload
+        P1["Pod/&lt;name&gt;-xxxxx"]:::pod
+        P2["Pod/&lt;name&gt;-yyyyy"]:::pod
+
+        %% --- configuration ---
+        CM["ConfigMap/&lt;name&gt;<br/>KEY_A, KEY_B"]:::config
+        SEC["Secret/&lt;name&gt;<br/>PASSWORD"]:::config
+
+        %% --- stateful tier ---
+        STS["StatefulSet/&lt;name&gt;<br/>replicas: 1"]:::workload
+        DB["Pod/&lt;name&gt;-0"]:::pod
+        PVC["PVC/&lt;name&gt;<br/>10Gi RWO"]:::storage
+        PV["PV<br/>StorageClass: standard"]:::storage
+
+        %% --- reliability & security ---
+        HPA["HPA/&lt;name&gt;<br/>cpu 70% · 2→10"]:::observe
+        PDB["PDB/&lt;name&gt;<br/>minAvailable: 2"]:::observe
+        SA["ServiceAccount/&lt;name&gt;"]:::security
+        NP["NetworkPolicy/&lt;name&gt;<br/>allow api → db"]:::security
+    end
+
+    U --> ING
+    ING --> SVC
+    SVC --> EPS
+    EPS --> P1
+    EPS --> P2
+    DEP --> RS
+    RS --> P1
+    RS --> P2
+    P1 -->|":5432"| DB
+    STS --> DB
+    DB --> PVC
+    PVC --> PV
+
+    CM -.->|envFrom| P1
+    SEC -.->|env| P1
+    SA -.->|identity| P1
+    HPA -.->|scales| DEP
+    PDB -.->|protects| DEP
+    NP -.->|guards| DB
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef gateway  fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef storage  fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81
+    classDef security fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
+    classDef observe  fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#134e4a
+    classDef control  fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a

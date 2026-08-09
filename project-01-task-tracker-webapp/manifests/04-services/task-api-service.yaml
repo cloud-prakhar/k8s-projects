@@ -1,0 +1,31 @@
+# 04-services/task-api-service.yaml
+# WHY: Pod IPs are assigned at creation and change on every recreation. The
+#      frontend cannot chase them. A Service is a stable virtual IP + DNS name
+#      that always points at the CURRENT set of ready backend Pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable in-cluster endpoint for the task API"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP        # internal only — nothing outside the cluster can reach this
+  # THE SELECTOR IS THE WIRING. Any READY Pod in this namespace with these
+  # labels is added to the Service's EndpointSlice. A typo here produces a
+  # Service with zero endpoints and "connection refused" — with no error anywhere.
+  selector:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+  ports:
+    - name: http
+      port: 8080         # the port the SERVICE listens on (what clients call)
+      targetPort: http   # the container port, referenced BY NAME (see the Deployment)
+      protocol: TCP

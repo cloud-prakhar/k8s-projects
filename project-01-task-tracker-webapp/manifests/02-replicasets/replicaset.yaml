@@ -1,0 +1,51 @@
+# 02-replicasets/replicaset.yaml
+# WHY: A bare Pod that dies stays dead. A ReplicaSet continuously reconciles
+#      "how many exist" against "how many I want", recreating Pods as needed.
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "ReplicaSet keeping 3 task-api Pods alive — no rollout support"
+    lab.k8s-project/stage: "02-replicasets"
+spec:
+  replicas: 3
+  # THE SELECTOR IS THE CONTRACT. The ReplicaSet owns every Pod in this
+  # namespace matching these labels — including Pods it did not create.
+  # Keep it minimal and stable: it is immutable after creation.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-api
+      app.kubernetes.io/instance: task-api
+  template:
+    metadata:
+      # These labels MUST satisfy the selector above, or the API server rejects
+      # the object ("selector does not match template labels").
+      labels:
+        app.kubernetes.io/name: task-api
+        app.kubernetes.io/instance: task-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: task-api
+          image: task-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: "development"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

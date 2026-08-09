@@ -1,0 +1,56 @@
+# 04-services/task-web-deployment-patched.yaml
+# WHAT CHANGED vs 03-deployments/task-web-deployment.yaml:
+#   TASK_API_URL is no longer a Pod IP. It is the Service's DNS name.
+#   That name never changes, no matter how often backend Pods are recreated.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-web
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-web
+    app.kubernetes.io/instance: task-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task Tracker web UI — now talking to the backend via Service DNS"
+    lab.k8s-project/stage: "04-services"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-web
+      app.kubernetes.io/instance: task-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-web
+        app.kubernetes.io/instance: task-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: task-web
+          image: task-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Fully qualified: <service>.<namespace>.svc.cluster.local
+            # "task-api" alone would also work from inside this namespace, but
+            # the FQDN is explicit and immune to search-domain surprises.
+            - name: TASK_API_URL
+              value: "http://task-api.task-tracker.svc.cluster.local:8080"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

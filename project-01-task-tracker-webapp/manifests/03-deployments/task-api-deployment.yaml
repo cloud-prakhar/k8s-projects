@@ -1,0 +1,55 @@
+# 03-deployments/task-api-deployment.yaml
+# WHY: A ReplicaSet cannot change its Pods' image without you deleting Pods by
+#      hand. A Deployment manages ReplicaSets for you and gives you versioned,
+#      controlled rollouts plus rollback.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task API backend — 3 replicas, rolling updates"
+    lab.k8s-project/stage: "03-deployments"
+spec:
+  replicas: 3
+  # revisionHistoryLimit controls how many old ReplicaSets are kept.
+  # Those old ReplicaSets ARE your rollback capability — keep a few.
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-api
+      app.kubernetes.io/instance: task-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # at most 1 extra Pod above `replicas` during a rollout
+      maxUnavailable: 0  # never drop below `replicas` ready — zero-downtime
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-api
+        app.kubernetes.io/instance: task-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: task-api
+          image: task-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: "development"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

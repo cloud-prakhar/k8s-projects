@@ -1,0 +1,23 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local kube artifacts
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Secrets — never commit real credentials
+*.pem
+*.key
+secrets.env
+.env
+*-secret-real.yaml
+
+# Terraform / cloud state (Project 10)
+.terraform/
+*.tfstate
+*.tfstate.backup

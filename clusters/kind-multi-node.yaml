@@ -1,0 +1,50 @@
+# clusters/kind-multi-node.yaml
+# WHY: Scheduling, anti-affinity, topology spread, taints, drain and PDB labs
+#      are meaningless on one node. Three workers with fake zone labels give
+#      the scheduler real choices to make.
+#
+# Create:  kind create cluster --name kubernetes-lab --config clusters/kind-multi-node.yaml
+# Verify:  kubectl get nodes -L topology.kubernetes.io/zone
+# Node failure sim: docker stop kubernetes-lab-worker2
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubernetes-lab
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+
+  # Three workers, each in a different simulated zone. These are the standard
+  # well-known topology labels the scheduler and topologySpreadConstraints use.
+  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-a,node-tier=general"
+  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-b,node-tier=general"
+  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-c,node-tier=memory-optimized"

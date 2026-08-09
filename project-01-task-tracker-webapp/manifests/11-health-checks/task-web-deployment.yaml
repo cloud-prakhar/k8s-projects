@@ -1,0 +1,75 @@
+# 11-health-checks/task-web-deployment.yaml
+# WHY: same reasoning as the API tier — the Service must only route to Pods
+#      that can actually serve the UI.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-web
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-web
+    app.kubernetes.io/instance: task-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task Tracker web UI — health-probed"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-web
+      app.kubernetes.io/instance: task-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-web
+        app.kubernetes.io/instance: task-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: task-web
+          image: task-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TASK_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: task-tracker-config
+                  key: TASK_API_URL
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: task-api-secret
+                  key: API_TOKEN
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3

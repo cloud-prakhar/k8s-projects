@@ -1,0 +1,36 @@
+# 01-pods/pod.yaml
+# WHY: The simplest possible way to run a container on Kubernetes.
+#      This is a TEACHING artifact. You will delete it and watch it stay dead —
+#      that failure is what motivates stage 02.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: task-api
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-api
+    app.kubernetes.io/instance: task-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Bare Pod running the task API — no controller, no self-healing"
+    lab.k8s-project/stage: "01-pods"
+spec:
+  containers:
+    - name: task-api
+      image: task-api:1.0.0          # explicit version — never :latest
+      imagePullPolicy: IfNotPresent  # image was `kind load`ed; do not try the registry
+      ports:
+        - name: http                 # naming the port lets Services target it by name
+          containerPort: 8080
+          protocol: TCP
+      env:
+        - name: APP_ENV
+          value: "development"       # hardcoded for now — stage 05 moves this out
+        # Downward API: the pod tells the app its own name, so /api/info can
+        # show you WHICH pod answered. Nothing else can supply this at build time.
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name

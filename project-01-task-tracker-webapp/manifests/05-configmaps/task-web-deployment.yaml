@@ -1,0 +1,55 @@
+# 05-configmaps/task-web-deployment.yaml
+# WHAT CHANGED: TASK_API_URL now comes from the ConfigMap instead of being
+#               written into this file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-web
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-web
+    app.kubernetes.io/instance: task-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Task Tracker web UI — configuration externalised to a ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-web
+      app.kubernetes.io/instance: task-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-web
+        app.kubernetes.io/instance: task-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: task-tracker
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: task-web
+          image: task-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TASK_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: task-tracker-config
+                  key: TASK_API_URL
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

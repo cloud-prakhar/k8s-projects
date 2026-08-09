@@ -1,0 +1,27 @@
+# 04-services/task-web-service.yaml
+# WHY: The web tier needs one stable address too — for port-forwarding now, and
+#      for an Ingress to point at in later projects.
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-web
+  namespace: task-tracker
+  labels:
+    app.kubernetes.io/name: task-web
+    app.kubernetes.io/instance: task-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: task-tracker
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable in-cluster endpoint for the web tier"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: task-web
+    app.kubernetes.io/instance: task-web
+  ports:
+    - name: http
+      port: 80           # Service port and container port need not match
+      targetPort: http   # → containerPort 8080
+      protocol: TCP
