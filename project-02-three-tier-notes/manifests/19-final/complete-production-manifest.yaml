@@ -1,0 +1,750 @@
+# 19-final/complete-production-manifest.yaml
+# ---------------------------------------------------------------------------
+# THE COMPLETE DESIRED STATE of Project 02, in one file.
+#
+# WHY this file exists: stages 00→11 each showed ONE resource at the moment it
+# was needed, so the final version of the database is spread across stages 05,
+# 06, 08 and 11. That is excellent for learning and bad for operating — the
+# order you apply things in changes the result. This file is the single source
+# of truth: apply it against any state and the cluster converges to the same
+# place.
+#
+# WHAT IS DELIBERATELY ABSENT — the teaching artifacts:
+#   • the emptyDir and hostPath experiments (stage 07) — superseded, and hostPath
+#     must never reach a real cluster
+#   • the standalone postgres-data PVC (stage 07) — the StatefulSet's
+#     volumeClaimTemplate creates its own
+#   • the notes-platform-retain StorageClass (stage 07) — a comparison exhibit
+#   • the NodePort and LoadBalancer Services (stage 10) — the Ingress is the
+#     real entry point; those existed to show what sits underneath it
+#   • the IngressClass (stage 09) — installed with the ingress controller, not
+#     owned by this application
+#
+# PREREQUISITE: the NGINX Ingress Controller must already be installed, or the
+# Ingress below is created successfully and does nothing. See
+# ../../scripts/manual-steps.md Part 1.
+#
+# `---` separates documents. Multi-document files are avoided during the
+# teaching stages (one resource per file) and used only here.
+#
+# Apply:    kubectl apply -f manifests/19-final/complete-production-manifest.yaml
+# Or:       kubectl apply -k manifests/19-final/
+# ---------------------------------------------------------------------------
+# --- Namespace — the scope everything below lives in ---------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-platform
+    app.kubernetes.io/instance: notes-platform
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    kubernetes.io/description: "Three-tier Notes Platform — web, API and PostgreSQL"
+    lab.k8s-project/stage: "00-namespace"
+    lab.k8s-project/teaches: "namespaces,scoping,cleanup"
+
+---
+# --- Configuration — non-confidential, shared by all three tiers (stage 05) ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes-config
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-config
+    app.kubernetes.io/instance: notes-config
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Non-confidential configuration shared by all three tiers"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap,envfrom,configmapkeyref"
+data:
+  # EVERY value here is a string. `POSTGRES_PORT: 5432` (unquoted) is parsed as
+  # an integer and rejected by the API server. Quote everything, always.
+  APP_ENV: "development"
+  LOG_LEVEL: "info"
+
+  # The database connection, minus the password — that is stage 06's job.
+  POSTGRES_HOST: "postgres.notes-platform.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "notes"
+  POSTGRES_USER: "notes"
+
+  # Where the web tier finds the API. One line, one source of truth: rename the
+  # Service and you edit here, not in two workload manifests.
+  NOTES_API_URL: "http://notes-api.notes-platform.svc.cluster.local:8080"
+
+---
+# --- Seed schema, mounted as a file into the database container (stage 05) -----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres-init
+    app.kubernetes.io/instance: postgres-init
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Seed schema executed by PostgreSQL on first initialisation"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap-as-volume,subpath,initdb"
+data:
+  # `|` is a YAML block scalar: everything indented below is one string value,
+  # newlines preserved. This is how whole config files live inside a ConfigMap.
+  init.sql: |
+    -- application/database/init.sql
+    -- Seed schema and welcome rows for the Notes Platform.
+    --
+    -- HOW THIS RUNS: the official postgres image executes every *.sql file it finds
+    -- in /docker-entrypoint-initdb.d/ — but ONLY when the data directory is empty,
+    -- i.e. exactly once, on first initialisation. That is not a quirk to work
+    -- around; it is the behaviour that makes the storage lesson visible:
+    --
+    --   • No volume        → a new empty data dir every restart → this file re-runs
+    --                        every time and the welcome notes come back, but YOUR
+    --                        notes do not. Data loss dressed up as "it works".
+    --   • Persistent volume → the data dir survives → this file never runs again,
+    --                        and everything you wrote is still there.
+    --
+    -- Stage 05 mounts this file from a ConfigMap. Stage 07 gives it a volume.
+    
+    CREATE TABLE IF NOT EXISTS notes (
+        id         SERIAL PRIMARY KEY,
+        body       TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    
+    -- Ordering notes by creation time is the only query the API makes, so the
+    -- index earns its keep. It is also here to prove the ConfigMap mount worked:
+    -- if \d notes shows this index, the file was read.
+    CREATE INDEX IF NOT EXISTS notes_created_at_idx ON notes (created_at);
+    
+    INSERT INTO notes (body) VALUES
+        ('Welcome — this row came from the ConfigMap-mounted init.sql'),
+        ('Delete the postgres pod and refresh. Which notes survive?');
+
+---
+# --- Credentials — a different KIND of object, handled differently (stage 06) ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres-secret
+    app.kubernetes.io/instance: postgres-secret
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "PostgreSQL superuser password, consumed by the database and the API"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secret,secretkeyref,base64-is-not-encryption"
+type: Opaque   # generic key/value. Other types: kubernetes.io/tls, /dockerconfigjson, /basic-auth
+# `stringData` takes plain text and the API server base64-encodes it for you.
+# Use it in hand-written manifests — far less error-prone than base64-ing values
+# yourself, and exactly as (in)secure. Base64 is ENCODING, NOT ENCRYPTION:
+# anyone who can read this object can read the password.
+#
+# ONE key, consumed by TWO workloads: Postgres uses it to CREATE the superuser
+# on first initialisation, and notes-api uses it to CONNECT. If they ever
+# disagree, the API gets "password authentication failed" while both pods look
+# perfectly healthy.
+stringData:
+  POSTGRES_PASSWORD: "dev-password-not-for-production"
+
+---
+# --- Networking — stable names for every tier (stage 04) -----------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for PostgreSQL"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,coredns"
+spec:
+  type: ClusterIP                 # internal only — a database must never be exposed externally
+  selector:                       # ← MUST match the Deployment's POD TEMPLATE labels
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres              # always name ports; some features require it
+      port: 5432                  # the port clients connect to
+      targetPort: postgres        # the container's NAMED port
+      protocol: TCP
+
+---
+# --- Headless Service — per-pod DNS for the StatefulSet (stage 08) -------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Headless Service giving each PostgreSQL pod a stable DNS name"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns,stable-network-identity"
+spec:
+  # THE line that makes it headless. Not a type — ClusterIP with no IP.
+  clusterIP: None
+  # Give pods their DNS name as soon as they exist, before they are Ready.
+  # StatefulSet members must be able to find each other DURING start-up, which
+  # is precisely when they are not yet Ready. Leave this false and an ordered
+  # cluster bootstrap deadlocks waiting for names that do not resolve yet.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for the notes API"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,load-balancing,endpointslice"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for the notes web UI"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,port-vs-targetport"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+  ports:
+    - name: http
+      port: 80                    # the Service listens on 80…
+      targetPort: http            # …and forwards to the container's 8080 ("http")
+      protocol: TCP
+
+---
+# --- Database — StatefulSet with its own volume and exec probes (stages 08, 11) ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL StatefulSet — stable identity, per-pod volume, health-probed"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "exec-probes,pg_isready,readiness-gates-endpoints"
+spec:
+  # The headless Service that owns the per-pod DNS names. This field is NOT
+  # optional and NOT automatic: name a Service that does not exist and the pods
+  # still start, but `postgres-0.postgres-headless…` never resolves.
+  serviceName: postgres-headless
+  # Still ONE replica. A second replica would be a second, EMPTY database with
+  # its own volume — not a replica of the first. PostgreSQL replication is
+  # configured inside PostgreSQL (primary/standby, WAL streaming); Kubernetes
+  # only supplies identity and storage. Project 03 scales a StatefulSet whose
+  # software CAN cluster (Redis); the honest answer for Postgres in production
+  # is an operator such as CloudNativePG.
+  replicas: 1
+  revisionHistoryLimit: 5
+  # Like a Deployment's, this selector is IMMUTABLE. Keep it minimal.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  # OrderedReady: pods are created 0,1,2… and each must be Running AND Ready
+  # before the next begins; on scale-down they are removed in reverse. The
+  # alternative, `Parallel`, starts them all at once — right for members that do
+  # not need to bootstrap from each other.
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    # RollingUpdate on a StatefulSet walks from the HIGHEST ordinal down, one
+    # pod at a time, waiting for Ready. `partition: N` updates only ordinals
+    # ≥ N, which is how canary upgrades of stateful systems are done.
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "17.5"
+    spec:
+      # Give Postgres time to finish a clean shutdown before SIGKILL. The
+      # default 30s is usually enough for a small database; a large one needs
+      # more, and killing it mid-checkpoint means crash recovery on next boot.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # STARTUP: first initialisation of an empty data directory runs initdb
+          # and the seed script, which takes far longer than a normal boot.
+          # Budget = 30 × 5s = 150s before the liveness probe is allowed to act.
+          #
+          # ⚠️ -h 127.0.0.1 is not decoration. During initdb, PostgreSQL runs a
+          #    TEMPORARY server that listens on a unix socket ONLY. A pg_isready
+          #    without -h talks to that socket, reports "accepting connections"
+          #    while the database is still being built, and the pod is declared
+          #    Ready far too early. Forcing TCP tests the port real clients use.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          # READINESS: while this fails, the postgres pod is removed from the
+          # Service's EndpointSlice, so notes-api gets a fast connection error
+          # instead of a hanging socket. Nothing is restarted.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # LIVENESS: deliberately slack. Restarting a database is a serious
+          # act — it means crash recovery on the next boot. Only kill it when it
+          # has genuinely stopped answering for a full minute
+          # (6 × 10s = 60s), never on a single slow response.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          volumeMounts:
+            # The name matches the volumeClaimTemplate below, NOT a volume in a
+            # `volumes:` list. There is no `volumes:` entry for it at all.
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/10-init.sql
+              subPath: init.sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init
+            defaultMode: 0444
+  # THE feature that separates a StatefulSet from a Deployment. This is a
+  # TEMPLATE: the controller stamps out one real PVC per pod, named
+  # <template-name>-<statefulset-name>-<ordinal> → postgres-data-postgres-0.
+  #
+  # ⚠️ Those PVCs are NOT garbage-collected when the StatefulSet is deleted.
+  #    That is deliberate — deleting a workload should not destroy its data —
+  #    and it is why `kubectl delete statefulset` followed by `kubectl get pvc`
+  #    surprises people. Recreate the StatefulSet and pod 0 reattaches to its
+  #    old volume, data intact.
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/instance: postgres
+          app.kubernetes.io/component: database
+          app.kubernetes.io/part-of: notes-platform
+        annotations:
+          kubernetes.io/description: "Per-pod durable storage for the PostgreSQL data directory"
+      spec:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+# --- API tier — init container + three probes (stages 05, 06, 11) --------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes REST API — dependency-ordered start-up and health-probed"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "init-containers,readiness,liveness,startup-probe"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-api
+      app.kubernetes.io/instance: notes-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-api
+        app.kubernetes.io/instance: notes-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      initContainers:
+        # Init containers run to COMPLETION, in order, BEFORE any app container
+        # starts. If one fails it is retried according to the pod's restartPolicy,
+        # and the pod stays in `Init:0/1` — a status that means "your app never
+        # even started", not "your app is broken".
+        #
+        # WHY it is here: on a cold cluster the API pods are scheduled at the
+        # same moment as PostgreSQL and lose the race. Without this the API
+        # spends its first minute logging connection failures, and a stricter
+        # app than ours would CrashLoopBackOff.
+        #
+        # Reusing the postgres image costs nothing — it is already on the node —
+        # and it is the only image that ships pg_isready.
+        - name: wait-for-postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            # -h forces a TCP check. Without it pg_isready would test a local
+            # unix socket that does not exist in this container at all.
+            - |
+              until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+                echo "waiting for $POSTGRES_HOST:$POSTGRES_PORT …"
+                sleep 2
+              done
+              echo "postgres is accepting connections"
+          envFrom:
+            - configMapRef:
+                name: notes-config
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+      containers:
+        - name: notes-api
+          image: notes-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            # Every key in notes-config becomes an env var. Convenient, but note
+            # what you give up: you can no longer tell from this file WHICH
+            # variables the container receives. `kubectl exec … -- env` becomes
+            # the only honest answer.
+            - configMapRef:
+                name: notes-config
+          env:
+            # The one value that must never appear in a ConfigMap.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # STARTUP: until this succeeds, readiness and liveness are SUSPENDED.
+          # Budget = failureThreshold × periodSeconds = 30 × 1s = 30s to boot.
+          # This is what protects a slow starter from being killed by its own
+          # liveness probe before it has finished starting.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http          # reference the NAMED port, not a number
+            periodSeconds: 1
+            failureThreshold: 30
+
+          # READINESS: gates Service traffic, and is checked FOREVER, not once.
+          # /healthz opens a real database connection, so if PostgreSQL goes
+          # away these pods leave the EndpointSlice and clients get a clean
+          # failure instead of a timeout. They are NOT restarted.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3   # ~15s of failure before traffic is withdrawn
+
+          # LIVENESS: restarts the container. Be conservative. It points at
+          # /livez, which checks only that this process is answering — NEVER at
+          # a dependency. "The database is slow" must not mean "kill the API".
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+
+---
+# --- Web tier — probes and zero-downtime rollouts (stages 05, 11) --------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes web UI — health-probed, zero-downtime rollouts"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "readiness,liveness,startup-probe"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-web
+      app.kubernetes.io/instance: notes-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-web
+        app.kubernetes.io/instance: notes-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-web
+          image: notes-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Named keys rather than envFrom: this tier only needs two settings,
+            # and the database credentials have no business being in its
+            # environment at all. Give each container the smallest env you can.
+            - name: NOTES_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: NOTES_API_URL
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+
+          # maxUnavailable: 0 above is only MEANINGFUL because this probe
+          # exists. Without a readiness probe a pod counts as "available" the
+          # instant it is Running, so the rollout advances before the new pod
+          # can serve anything — and users get 502s during every deploy.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+
+---
+# --- Entry point — HTTP routing into the platform (stage 09) -------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notes-ingress
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-ingress
+    app.kubernetes.io/instance: notes-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "HTTP routing for the Notes Platform: / to the UI, /api to the API"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingress,path-routing,ingressclass"
+    # Controller-SPECIFIC settings live in annotations, and every controller has
+    # its own vocabulary. This one caps the request body — an nginx default of
+    # 1m surprises people uploading files. Portable Ingress ends where the
+    # annotations begin; that gap is why the Gateway API exists.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+spec:
+  # Which controller should implement this. Get it wrong (or omit it on a
+  # cluster with no default class) and the Ingress is created successfully,
+  # reports no error, and does absolutely nothing.
+  ingressClassName: nginx
+  rules:
+    # A made-up hostname. Add it to /etc/hosts pointing at 127.0.0.1 — Ingress
+    # matches on the HTTP Host header, so a name that resolves anywhere useful
+    # is enough. Real clusters point a real DNS record at the load balancer.
+    - host: notes.local
+      http:
+        paths:
+          # MOST SPECIFIC FIRST is good practice for readability, though
+          # nginx matches the longest prefix regardless of order here.
+          - path: /api
+            # Prefix   — /api matches /api, /api/notes, /api/anything
+            # Exact    — only the exact string
+            # ImplementationSpecific — whatever the controller decides (avoid)
+            pathType: Prefix
+            backend:
+              service:
+                name: notes-api
+                port:
+                  # The SERVICE port, not the container port. Naming the port
+                  # instead of numbering it (`name: http`) also works and
+                  # survives a port renumbering.
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: notes-web
+                port:
+                  number: 80

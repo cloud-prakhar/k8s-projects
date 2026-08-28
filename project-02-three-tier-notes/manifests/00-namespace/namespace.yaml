@@ -1,0 +1,18 @@
+# 00-namespace/namespace.yaml
+# WHY: Everything this project creates must be deletable in one command, and
+#      must not collide with Project 01's objects sitting in the same cluster.
+#      A Namespace is the scope that makes both true.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-platform
+    app.kubernetes.io/instance: notes-platform
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    kubernetes.io/description: "Three-tier Notes Platform — web, API and PostgreSQL"
+    lab.k8s-project/stage: "00-namespace"
+    lab.k8s-project/teaches: "namespaces,scoping,cleanup"

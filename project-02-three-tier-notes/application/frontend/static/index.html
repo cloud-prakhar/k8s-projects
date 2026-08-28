@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Notes Platform — Kubernetes Project Lab</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 660px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; gap: .5rem; margin: 1.5rem 0; }
+  input { flex: 1; padding: .55rem .7rem; border: 1px solid #94a3b8; border-radius: 6px; font: inherit; }
+  button { padding: .55rem .9rem; border: 0; border-radius: 6px; background: #4f46e5; color: #fff; font: inherit; cursor: pointer; }
+  li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .5rem 0; border-bottom: 1px solid #cbd5e1; }
+  li time { font: .75rem ui-monospace, monospace; color: #64748b; white-space: nowrap; }
+  ul { list-style: none; padding: 0; }
+  .del { background: none; color: #dc2626; }
+  #meta { margin-top: 2rem; padding: .75rem; border-radius: 6px; background: #f1f5f9; color: #0f172a; font: .8rem ui-monospace, monospace; white-space: pre-wrap; }
+  #err { color: #dc2626; font: .85rem ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+
+<h1>🗒️ Notes Platform</h1>
+<p style="font-size:.85rem;color:#64748b">
+  Every note below is a row in PostgreSQL. Delete the database pod and refresh —
+  whether these notes survive is the whole lesson of this project.
+</p>
+<form id="f"><input id="t" placeholder="Write a note…" autocomplete="off"><button>Save</button></form>
+<ul id="list"></ul>
+<div id="err"></div>
+<!-- Shows which API pod answered AND whether it can reach the database.
+     During stage 07 you will watch db_connected flip to false, then back. -->
+<div id="meta">loading…</div>
+
+<script>
+const api = "/api/notes", err = document.getElementById("err");
+
+async function load() {
+  err.textContent = "";
+  try {
+    const r = await fetch(api);
+    if (!r.ok) throw new Error(`API returned ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const notes = await r.json();
+    document.getElementById("list").innerHTML = notes.map(n =>
+      `<li><span>${n.body}</span><time>${n.created_at.slice(0, 19).replace("T", " ")}</time>` +
+      `<button class="del" onclick="del(${n.id})">delete</button></li>`
+    ).join("") || "<li><em>no notes yet</em></li>";
+  } catch (e) { err.textContent = "Cannot load notes: " + e.message; }
+  try {
+    const i = await (await fetch("/api/info")).json();
+    document.getElementById("meta").textContent =
+      `served by pod : ${i.pod}\n` +
+      `database      : ${i.db_user}@${i.db_host}/${i.db_name}\n` +
+      `db connected  : ${i.db_connected}${i.db_error ? "  (" + i.db_error + ")" : ""}\n` +
+      `notes stored  : ${i.note_count}\n` +
+      `APP_ENV       : ${i.app_env}`;
+  } catch { document.getElementById("meta").textContent = "backend info unavailable"; }
+}
+async function del(id) { await fetch(`${api}?id=${id}`, { method: "DELETE" }); load(); }
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const t = document.getElementById("t");
+  if (!t.value.trim()) return;
+  await fetch(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: t.value }) });
+  t.value = ""; load();
+};
+load(); setInterval(load, 5000);
+</script>

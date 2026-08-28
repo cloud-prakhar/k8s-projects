@@ -5,8 +5,8 @@ reason to exist, chosen so that the Kubernetes resource it teaches is *genuinely
 
 | # | Slug | Difficulty | Cluster | Est. time |
 |---|---|---|---|---|
-| 01 | `project-01-task-tracker-webapp` | 🟢 Beginner | single-node | 3–4 h |
-| 02 | `project-02-three-tier-notes` | 🟢 Beginner+ | ingress | 4–5 h |
+| 01 | [`project-01-task-tracker-webapp`](../project-01-task-tracker-webapp/) ✅ | 🟢 Beginner | single-node | 3–4 h |
+| 02 | [`project-02-three-tier-notes`](../project-02-three-tier-notes/) ✅ | 🟢 Beginner+ | ingress | 4–5 h |
 | 03 | `project-03-url-shortener` | 🟡 Intermediate | ingress | 4–5 h |
 | 04 | `project-04-ecommerce-microservices` | 🟡 Intermediate | ingress | 5–6 h |
 | 05 | `project-05-production-web-platform` | 🟡 Intermediate+ | multi-node | 5–6 h |
@@ -47,12 +47,18 @@ ConfigMap. Add an API token in plaintext → introduce Secret.
 
 ## Project 02 — Three-Tier Notes Platform
 
-**Application:** Notes app. Frontend (served static) → Backend API → **PostgreSQL**.
+> ✅ **Built** — [`project-02-three-tier-notes/`](../project-02-three-tier-notes/)
 
-**The narrative:** Run Postgres as a Deployment with no volume → write notes → delete the pod → data gone. Introduce
-`emptyDir` → still gone on reschedule. Introduce PVC + dynamic StorageClass → data survives. Then ask: what if we need
-two Postgres replicas with stable names and their own volumes? → StatefulSet + headless Service. Meanwhile the app is
-only reachable by `port-forward` → introduce NodePort, feel its limits → introduce Ingress + NGINX Ingress Controller.
+**Application:** [Notes app](../project-02-three-tier-notes/). Frontend (Flask, serves the UI and proxies `/api`) →
+Backend API (Flask + psycopg) → **PostgreSQL 17**.
+
+**The narrative:** Run Postgres as a Deployment with hardcoded pod IPs → Services fix the wiring → ConfigMaps and a
+Secret fix the configuration → write notes, delete the pod, **data gone**. Introduce `emptyDir` → survives a container
+restart, still gone on pod deletion. Introduce PVC + dynamic StorageClass → data survives. Scale to two replicas →
+both fight over one `ReadWriteOnce` volume → StatefulSet + headless Service + `volumeClaimTemplates`. Meanwhile the app
+is only reachable by `port-forward` → introduce Ingress + the NGINX Ingress Controller → then ask *how traffic reaches
+the controller at all* → NodePort and LoadBalancer, and why `<pending>` on Kind is correct. Finally a rollout drops
+requests and the API starts before the database → probes and an init container.
 
 **Concepts covered**
 
@@ -61,11 +67,13 @@ only reachable by `port-forward` → introduce NodePort, feel its limits → int
 | Storage | `emptyDir`, `hostPath` (teaching only), PV, PVC, StorageClass, dynamic provisioning, access modes, reclaim policies, `volumeClaimTemplates` |
 | Workloads | StatefulSet vs Deployment, ordered start-up, stable identity |
 | Networking | Headless Service, NodePort, Ingress, **IngressClass**, Ingress Controller ≠ Ingress resource |
-| Reliability | Readiness & liveness probes (DB connectivity), init container that waits for Postgres |
-| Config | ConfigMap for DB host/name, Secret for credentials, `envFrom` |
+| Reliability | Startup, readiness & liveness probes (HTTP and `exec`/`pg_isready`), init container that waits for Postgres |
+| Config | ConfigMap for DB host/name (`envFrom`, `configMapKeyRef`), **ConfigMap as a file** (`init.sql` via `subPath`), Secret for credentials |
 
-**Failure labs:** `Pending` PVC (no matching StorageClass), pod stuck `ContainerCreating` on volume attach, Ingress
-404 (wrong host/path), Ingress with no controller installed, readiness probe failing → endpoint removed from Service.
+**Failure labs:** twelve, including `Pending` PVC (no matching StorageClass), two writers on one `ReadWriteOnce`
+volume, Ingress 404 vs 502 vs 503, a Secret that disagrees with the initialised database, liveness pointed at a
+dependency (`CrashLoopBackOff`, exit 137), an init container that waits forever, per-pod DNS that returns NXDOMAIN,
+and a StatefulSet deleted while its PVC survives.
 
 ---
 

@@ -1,0 +1,76 @@
+# 03-deployments/notes-api-deployment.yaml
+# WHY: The API tier needs the same lifecycle management as any other workload —
+#      self-healing, rollouts, rollback.
+#
+# ⚠️ BROKEN BY DESIGN: POSTGRES_HOST is a HARDCODED POD IP. It works exactly
+#    until the Postgres pod is recreated, which happens on every restart, every
+#    node reboot and every rollout. That breakage motivates stage 04.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes REST API — reads and writes the notes table in PostgreSQL"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,pod-ip-instability"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-api
+      app.kubernetes.io/instance: notes-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-api
+        app.kubernetes.io/instance: notes-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-api
+          image: notes-api:1.0.0
+          imagePullPolicy: IfNotPresent    # the image was `kind load`ed, not pushed
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # ⚠️ BROKEN BY DESIGN — replace with the real Postgres Pod IP from
+            #    `kubectl get pods -o wide`, then delete that pod and watch this
+            #    fail. Stage 04 replaces it with a name that never changes.
+            - name: POSTGRES_HOST
+              value: "10.244.0.99"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "notes"
+            - name: POSTGRES_USER
+              value: "notes"
+            # ⚠️ PLAINTEXT CREDENTIAL IN GIT — fixed in stage 06.
+            - name: POSTGRES_PASSWORD
+              value: "devpassword"
+            # The Downward API: the pod's own name, injected by the kubelet.
+            # Nothing at build time can know this, which is exactly why it
+            # exists — and it is how the UI shows you which pod answered.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

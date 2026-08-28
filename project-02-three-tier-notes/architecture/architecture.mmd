@@ -1,0 +1,85 @@
+%% Project 02 — Notes Platform, Low-Level Design
+%% Every Kubernetes object the project creates in its FINAL state, and how they
+%% wire together. Source for the diagram in README.md §7.
+%%
+%% Render:  mmdc -i architecture.mmd -o architecture.png
+%% Palette: docs/CONVENTIONS.md §6.1 — the same colours mean the same layers in
+%%          all ten projects.
+flowchart TB
+    U["👤 User<br/>http://notes.local"]:::external
+
+    subgraph INGNS["📦 Namespace: ingress-nginx (cluster software)"]
+        ICTL["Deployment/ingress-nginx-controller<br/>hostPort 80/443"]:::gateway
+    end
+
+    ICLASS["IngressClass/nginx<br/>controller: k8s.io/ingress-nginx"]:::gateway
+
+    subgraph NS["📦 Namespace: notes-platform"]
+        direction TB
+
+        ING["Ingress/notes-ingress<br/>notes.local · /api → api · / → web"]:::gateway
+
+        SVCW["Service/notes-web<br/>ClusterIP :80 → http"]:::network
+        EPSW["EndpointSlice/notes-web-…<br/>ready web pod IPs"]:::network
+        DEPW["Deployment/notes-web<br/>replicas: 2 · maxUnavailable: 0"]:::workload
+        RSW["ReplicaSet/notes-web-7b9c"]:::workload
+        PW1["Pod/notes-web-…-a1<br/>probes: /healthz /livez"]:::pod
+        PW2["Pod/notes-web-…-b2"]:::pod
+
+        SVCA["Service/notes-api<br/>ClusterIP :8080 → http"]:::network
+        EPSA["EndpointSlice/notes-api-…<br/>ready API pod IPs"]:::network
+        DEPA["Deployment/notes-api<br/>replicas: 2 · maxUnavailable: 0"]:::workload
+        RSA["ReplicaSet/notes-api-6f4d"]:::workload
+        PA1["Pod/notes-api-…-x1<br/>init: wait-for-postgres"]:::pod
+        PA2["Pod/notes-api-…-y2"]:::pod
+
+        SVCP["Service/postgres<br/>ClusterIP :5432"]:::network
+        SVCH["Service/postgres-headless<br/>clusterIP: None<br/>per-pod DNS"]:::network
+        STS["StatefulSet/postgres<br/>replicas: 1 · serviceName: postgres-headless"]:::workload
+        P0["Pod/postgres-0<br/>stable name · exec probe pg_isready"]:::pod
+        PVC["PVC/postgres-data-postgres-0<br/>1Gi RWO · class standard"]:::storage
+
+        CM["ConfigMap/notes-config<br/>host · port · db · user · APP_ENV"]:::config
+        CMI["ConfigMap/postgres-init<br/>init.sql, mounted with subPath"]:::config
+        SEC["Secret/postgres-secret<br/>POSTGRES_PASSWORD"]:::config
+
+        KUBELET["kubelet probes<br/>startup · readiness · liveness"]:::observe
+    end
+
+    PV["PV/pvc-8f3a…<br/>cluster-scoped"]:::storage
+    SC["StorageClass/standard<br/>rancher.io/local-path · Delete"]:::storage
+
+    U -->|"HTTP :80"| ICTL
+    ING -.->|"ingressClassName"| ICLASS
+    ICLASS -.->|"claimed by"| ICTL
+    ING -.->|"watched by"| ICTL
+    ICTL -->|"/ → ready pod IPs"| EPSW
+    ICTL -->|"/api → ready pod IPs"| EPSA
+
+    SVCW --> EPSW --> PW1 & PW2
+    DEPW --> RSW --> PW1 & PW2
+
+    PW1 -->|"NOTES_API_URL<br/>notes-api.notes-platform.svc"| SVCA
+    PW2 --> SVCA
+    SVCA --> EPSA --> PA1 & PA2
+    DEPA --> RSA --> PA1 & PA2
+
+    PA1 -->|"POSTGRES_HOST :5432"| SVCP --> P0
+    P0 -.->|"endpoint of"| SVCH
+    STS --> P0
+    STS -.->|"volumeClaimTemplate"| PVC --> PV
+    SC -.->|"provisions"| PV
+
+    CM -.->|"envFrom / configMapKeyRef"| PA1 & PW1 & P0
+    SEC -.->|"secretKeyRef"| PA1 & P0
+    CMI -.->|"volume + subPath"| P0
+    KUBELET -.->|"readiness gates<br/>EndpointSlice membership"| EPSA
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef gateway  fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef storage  fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81
+    classDef observe  fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#134e4a

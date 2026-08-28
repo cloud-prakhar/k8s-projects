@@ -1,0 +1,64 @@
+# 04-services/notes-web-deployment-patched.yaml
+# WHAT CHANGED vs 03-deployments/notes-web-deployment.yaml:
+#   NOTES_API_URL is the API Service's DNS name. Requests now reach BOTH ready
+#   API replicas instead of one hardcoded pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes web UI — now reaching the API through a Service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "service-dns,load-balancing"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-web
+      app.kubernetes.io/instance: notes-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-web
+        app.kubernetes.io/instance: notes-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-web
+          image: notes-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # One name, every ready replica behind it. Port 8080 here is the
+            # SERVICE port, which happens to equal the container port — they are
+            # different numbers for notes-web (80 → 8080), and confusing the two
+            # is a common source of connection-refused errors.
+            - name: NOTES_API_URL
+              value: "http://notes-api.notes-platform.svc.cluster.local:8080"
+            - name: APP_ENV
+              value: "development"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

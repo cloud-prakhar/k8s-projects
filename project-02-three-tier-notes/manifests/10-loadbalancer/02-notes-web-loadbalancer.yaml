@@ -1,0 +1,43 @@
+# 10-loadbalancer/02-notes-web-loadbalancer.yaml
+# WHY: `type: LoadBalancer` is what production actually uses in front of an
+#      ingress controller. It is worth applying on Kind precisely BECAUSE of
+#      what happens: nothing.
+#
+# 🧪 EXPECTED ON KIND: EXTERNAL-IP stays `<pending>` forever, and that is the
+#    correct behaviour, not a broken cluster. `type: LoadBalancer` does not
+#    create a load balancer — it asks the CLOUD CONTROLLER MANAGER to create one
+#    with the provider's API. A bare Kind cluster has no cloud provider, so
+#    nobody answers the request. (Install `cloud-provider-kind`, or MetalLB, and
+#    the same manifest gets an IP.)
+#
+# 🏭 ON EKS the identical manifest provisions a real NLB and bills for it.
+#    On GKE/AKS the same. THAT is why "it works on my cluster" is not a
+#    statement about YAML.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-web-lb
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "LoadBalancer Service — pending on Kind by design, a real NLB on a cloud"
+    lab.k8s-project/stage: "10-loadbalancer"
+    lab.k8s-project/teaches: "loadbalancer,cloud-controller-manager,platform-differences"
+spec:
+  # A superset of NodePort, which is a superset of ClusterIP. Applying this
+  # allocates a ClusterIP AND a node port, then waits for an external address
+  # that only a cloud controller can supply.
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

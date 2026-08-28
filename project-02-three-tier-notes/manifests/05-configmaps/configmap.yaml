@@ -1,0 +1,33 @@
+# 05-configmaps/configmap.yaml
+# WHY: The database host, port, name and user were literals repeated across
+#      three Deployment manifests. Changing one meant editing workload specs and
+#      hoping you found every copy. Configuration belongs in its own object.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes-config
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-config
+    app.kubernetes.io/instance: notes-config
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Non-confidential configuration shared by all three tiers"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap,envfrom,configmapkeyref"
+data:
+  # EVERY value here is a string. `POSTGRES_PORT: 5432` (unquoted) is parsed as
+  # an integer and rejected by the API server. Quote everything, always.
+  APP_ENV: "development"
+  LOG_LEVEL: "info"
+
+  # The database connection, minus the password — that is stage 06's job.
+  POSTGRES_HOST: "postgres.notes-platform.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "notes"
+  POSTGRES_USER: "notes"
+
+  # Where the web tier finds the API. One line, one source of truth: rename the
+  # Service and you edit here, not in two workload manifests.
+  NOTES_API_URL: "http://notes-api.notes-platform.svc.cluster.local:8080"

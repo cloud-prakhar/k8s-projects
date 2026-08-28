@@ -101,4 +101,4 @@ Everything above is self-contained — these are for going deeper, not for filli
 
 | ◀ Previous | ▲ Up | Next ▶ |
 |---|:--:|---:|
-| ◀ **[11 Probes](../11-health-checks/README.md)** | [Project 01](../../README.md) · [Manual steps](../../scripts/manual-steps.md) | **[Project 02 →](../../../docs/ROADMAP.md#project-02--three-tier-notes-platform)** ▶ |
+| ◀ **[11 Probes](../11-health-checks/README.md)** | [Project 01](../../README.md) · [Manual steps](../../scripts/manual-steps.md) | **[Project 02 →](../../../project-02-three-tier-notes/README.md)** ▶ |

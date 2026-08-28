@@ -1,0 +1,107 @@
+# 07-storage/06-postgres-deployment-pvc.yaml
+# WHAT CHANGED vs 01-postgres-deployment-emptydir.yaml:
+#   ONE volume definition. `emptyDir: {}` became `persistentVolumeClaim`.
+#
+# That is the entire difference between "data dies with the pod" and "data
+# outlives the pod, the node and the Deployment". Delete this pod now and the
+# replacement mounts the same volume with every note still in it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL backed by a PersistentVolumeClaim — data survives the pod"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "pvc,persistent-storage,recreate-strategy"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            # configMapKeyRef = ONE named key becomes ONE named variable.
+            # Explicit, greppable, and it fails loudly if the key is missing.
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_USER
+            # secretKeyRef looks identical to configMapKeyRef on purpose — the
+            # consumption API is the same. What differs is everything around
+            # the object: RBAC, describe output, encryption-at-rest, tmpfs.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            # PGDATA points at a SUBDIRECTORY of the mount point, never at the
+            # mount point itself. Mounting a volume at /var/lib/postgresql/data
+            # can leave a lost+found (or a root-owned empty dir) inside it, and
+            # Postgres refuses to initialise a non-empty directory. This single
+            # line is the most common cause of "my Postgres pod won't start".
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # (the init script mount, unchanged)
+            # subPath mounts ONE key as ONE file, leaving the rest of the target
+            # directory alone. Without it, mounting at /docker-entrypoint-initdb.d
+            # would replace the whole directory with the ConfigMap's contents.
+            #
+            # ⚠️ The trade-off: subPath mounts are NOT refreshed by the kubelet
+            #    when the ConfigMap changes. A whole-directory ConfigMap mount is
+            #    updated (~60s); a subPath mount is frozen for the pod's life.
+            #    For an init script that runs exactly once, that is irrelevant.
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/10-init.sql
+              subPath: init.sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        # The pod no longer describes the storage at all — it names a CLAIM.
+        # Which disk, on which node, from which provisioner, is somebody else's
+        # problem. That indirection is the whole design.
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: init-sql
+          configMap:
+            name: postgres-init
+            # 0o444 — read-only for everyone. The entrypoint only needs to read it.
+            defaultMode: 0444

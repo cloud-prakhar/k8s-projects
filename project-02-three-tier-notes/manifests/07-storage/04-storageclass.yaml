@@ -1,0 +1,42 @@
+# 07-storage/04-storageclass.yaml
+#
+# 🧪 TEACHING ARTIFACT — the Notes Platform uses Kind's built-in `standard`
+#    class. This one exists so you can compare two classes side by side and see
+#    that the reclaim policy is a property of the CLASS, not of the claim.
+#
+# WHY StorageClasses exist: without one, somebody has to create a PV by hand for
+# every workload that needs disk — the file above. A StorageClass names a
+# PROVISIONER and a set of parameters, and the provisioner creates the PV on
+# demand when a claim appears. That is "dynamic provisioning".
+#
+# ⚠️ StorageClasses are CLUSTER-SCOPED. Deleting the namespace does not remove
+#    this; ./scripts/cleanup.sh deletes it explicitly.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: notes-platform-retain
+  labels:
+    app.kubernetes.io/name: notes-platform-retain
+    app.kubernetes.io/instance: notes-platform-retain
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Teaching-only StorageClass: same provisioner as Kind's standard class, but Retain"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "storageclass,dynamic-provisioning,reclaim-policy,volume-binding-mode"
+# The controller that actually creates volumes. On Kind this is Rancher's
+# local-path-provisioner; on EKS it would be ebs.csi.aws.com, on GKE
+# pd.csi.storage.gke.io. The provisioner is what makes a class cloud-specific,
+# and it is why a manifest that names a class by hand is not portable.
+provisioner: rancher.io/local-path
+# Retain: keep the directory when the claim is deleted. Compare with Kind's
+# `standard` class, which is Delete — the data goes when the claim goes.
+reclaimPolicy: Retain
+# WaitForFirstConsumer: do not create the volume until a POD that uses the claim
+# is scheduled, so the volume is created on the node that pod landed on. With
+# `Immediate`, node-local storage can be created on node A while the pod is
+# scheduled to node B — and the pod hangs forever in ContainerCreating.
+volumeBindingMode: WaitForFirstConsumer
+# local-path volumes cannot be grown in place; a CSI driver that can would set
+# this to true and allow `kubectl edit pvc` to expand the volume.
+allowVolumeExpansion: false

@@ -1,0 +1,29 @@
+# 04-services/postgres-service.yaml
+# WHY: The API tier hardcoded the database's Pod IP and broke the first time
+#      that pod was recreated. This Service gives PostgreSQL one name and one
+#      virtual IP that outlive every pod behind it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for PostgreSQL"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,coredns"
+spec:
+  type: ClusterIP                 # internal only — a database must never be exposed externally
+  selector:                       # ← MUST match the Deployment's POD TEMPLATE labels
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres              # always name ports; some features require it
+      port: 5432                  # the port clients connect to
+      targetPort: postgres        # the container's NAMED port
+      protocol: TCP

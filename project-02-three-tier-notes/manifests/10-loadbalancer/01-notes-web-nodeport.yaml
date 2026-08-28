@@ -1,0 +1,40 @@
+# 10-loadbalancer/01-notes-web-nodeport.yaml
+# WHY: The Ingress works, but it hides a question you must be able to answer in
+#      an interview and in an outage: how does traffic get from OUTSIDE the
+#      cluster to the ingress controller in the first place? There are exactly
+#      three Service types that face outward, and NodePort is the primitive the
+#      other one is built on.
+#
+#      This Service exposes the web tier directly, bypassing the Ingress, so you
+#      can compare the two paths side by side.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-web-nodeport
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "NodePort exposure of the web UI — teaching comparison against Ingress"
+    lab.k8s-project/stage: "10-loadbalancer"
+    lab.k8s-project/teaches: "nodeport,external-exposure,kube-proxy"
+spec:
+  # NodePort is a SUPERSET of ClusterIP: you still get a cluster IP, plus every
+  # node starts listening on the same high port and forwards to the Service.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      # Pinned so the URL is predictable in a lesson. In production LEAVE THIS
+      # OUT and let the API server allocate from 30000–32767 — hardcoding it
+      # means a second Service asking for the same port fails to create.
+      nodePort: 30080
+      protocol: TCP

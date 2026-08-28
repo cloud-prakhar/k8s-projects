@@ -1,0 +1,29 @@
+# 04-services/notes-api-service.yaml
+# WHY: notes-web hardcoded one API Pod IP, so the second replica received
+#      nothing and any restart broke the page. A Service is both the stable
+#      name AND the load balancer across every ready replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for the notes API"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,load-balancing,endpointslice"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

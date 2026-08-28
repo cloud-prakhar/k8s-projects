@@ -1,0 +1,29 @@
+# 04-services/notes-web-service.yaml
+# WHY: Something has to be the front door. This is still a ClusterIP — reachable
+#      only from inside the cluster, or through `kubectl port-forward`. Stages 09
+#      and 10 are about making it reachable from a browser properly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP endpoint for the notes web UI"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,port-vs-targetport"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+  ports:
+    - name: http
+      port: 80                    # the Service listens on 80…
+      targetPort: http            # …and forwards to the container's 8080 ("http")
+      protocol: TCP

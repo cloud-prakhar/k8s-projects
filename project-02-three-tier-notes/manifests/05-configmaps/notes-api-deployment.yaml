@@ -1,0 +1,70 @@
+# 05-configmaps/notes-api-deployment.yaml
+# WHAT CHANGED vs 04-services/notes-api-deployment-patched.yaml:
+#   Every connection setting now arrives via `envFrom` — the THIRD consumption
+#   style: every key in the ConfigMap becomes an environment variable of the
+#   same name, with no per-key wiring.
+#
+# The password is still a literal. Stage 06.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes REST API — configuration supplied by ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "envfrom,configmap"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-api
+      app.kubernetes.io/instance: notes-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-api
+        app.kubernetes.io/instance: notes-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-api
+          image: notes-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            # Every key in notes-config becomes an env var. Convenient, but note
+            # what you give up: you can no longer tell from this file WHICH
+            # variables the container receives. `kubectl exec … -- env` becomes
+            # the only honest answer.
+            - configMapRef:
+                name: notes-config
+          env:
+            # ⚠️ STILL PLAINTEXT — stage 06. Listed after envFrom on purpose:
+            #    when a name appears in both, `env` wins.
+            - name: POSTGRES_PASSWORD
+              value: "devpassword"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

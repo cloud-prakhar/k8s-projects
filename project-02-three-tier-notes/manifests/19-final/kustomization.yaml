@@ -1,0 +1,40 @@
+# 19-final/kustomization.yaml
+# WHY: the combined manifest gives you one desired state; Kustomize lets you
+#      transform it per environment without editing it — image tags, labels,
+#      replica counts, name prefixes.
+#
+# Preview what it generates (ALWAYS do this before applying):
+#   kubectl kustomize manifests/19-final/
+# Apply:
+#   kubectl apply -k manifests/19-final/
+#
+# NOTE: `resources` may only reference files at or below this directory.
+#       Kustomize refuses `../other-stage/file.yaml` on purpose — a kustomization
+#       must be self-contained so it can be moved or vendored safely. That is
+#       why this stage carries its own complete manifest instead of pointing
+#       back at the teaching stages.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: notes-platform
+
+resources:
+  - complete-production-manifest.yaml
+
+# Applied to every resource above — one place to stamp ownership.
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false   # ⚠️ NEVER true: it would mutate the immutable
+                              #    Deployment and StatefulSet selectors, and
+                              #    every future apply would be rejected.
+
+# Pin image tags here rather than editing the manifest — this is the field an
+# environment overlay or a CI pipeline overrides.
+images:
+  - name: notes-api
+    newTag: "1.0.0"
+  - name: notes-web
+    newTag: "1.0.0"
+  - name: postgres
+    newTag: "17.5-alpine"

@@ -1,0 +1,74 @@
+# 04-services/notes-api-deployment-patched.yaml
+# WHAT CHANGED vs 03-deployments/notes-api-deployment.yaml:
+#   POSTGRES_HOST is no longer a Pod IP. It is the Service's DNS name, which
+#   never changes no matter how often the database pod is recreated.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes REST API — now reaching PostgreSQL through a Service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "service-dns,fqdn"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-api
+      app.kubernetes.io/instance: notes-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-api
+        app.kubernetes.io/instance: notes-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-api
+          image: notes-api:1.0.0
+          imagePullPolicy: IfNotPresent    # the image was `kind load`ed, not pushed
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The fully qualified Service name: <service>.<namespace>.svc.cluster.local
+            # Inside this namespace "postgres" alone would resolve too, thanks to
+            # the pod's DNS search path. The FQDN is written out in full because
+            # it is unambiguous and one fewer thing to get wrong across projects.
+            - name: POSTGRES_HOST
+              value: "postgres.notes-platform.svc.cluster.local"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "notes"
+            - name: POSTGRES_USER
+              value: "notes"
+            # ⚠️ PLAINTEXT CREDENTIAL IN GIT — fixed in stage 06.
+            - name: POSTGRES_PASSWORD
+              value: "devpassword"
+            # The Downward API: the pod's own name, injected by the kubelet.
+            # Nothing at build time can know this, which is exactly why it
+            # exists — and it is how the UI shows you which pod answered.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

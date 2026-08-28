@@ -1,0 +1,60 @@
+# 05-configmaps/postgres-init-configmap.yaml
+# WHY: The seed schema is a FILE, not an environment variable. This is the
+#      second way to consume a ConfigMap — as a file on disk — and the postgres
+#      image is built to look for exactly that: it executes every *.sql it finds
+#      in /docker-entrypoint-initdb.d/ the first time it initialises a database.
+#
+# KEEP IN SYNC with application/database/init.sql. In a real repository you
+# would generate this with:
+#   kubectl create configmap postgres-init -n notes-platform \
+#     --from-file=init.sql=application/database/init.sql \
+#     --dry-run=client -o yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres-init
+    app.kubernetes.io/instance: postgres-init
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Seed schema executed by PostgreSQL on first initialisation"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap-as-volume,subpath,initdb"
+data:
+  # `|` is a YAML block scalar: everything indented below is one string value,
+  # newlines preserved. This is how whole config files live inside a ConfigMap.
+  init.sql: |
+    -- application/database/init.sql
+    -- Seed schema and welcome rows for the Notes Platform.
+    --
+    -- HOW THIS RUNS: the official postgres image executes every *.sql file it finds
+    -- in /docker-entrypoint-initdb.d/ — but ONLY when the data directory is empty,
+    -- i.e. exactly once, on first initialisation. That is not a quirk to work
+    -- around; it is the behaviour that makes the storage lesson visible:
+    --
+    --   • No volume        → a new empty data dir every restart → this file re-runs
+    --                        every time and the welcome notes come back, but YOUR
+    --                        notes do not. Data loss dressed up as "it works".
+    --   • Persistent volume → the data dir survives → this file never runs again,
+    --                        and everything you wrote is still there.
+    --
+    -- Stage 05 mounts this file from a ConfigMap. Stage 07 gives it a volume.
+    
+    CREATE TABLE IF NOT EXISTS notes (
+        id         SERIAL PRIMARY KEY,
+        body       TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    
+    -- Ordering notes by creation time is the only query the API makes, so the
+    -- index earns its keep. It is also here to prove the ConfigMap mount worked:
+    -- if \d notes shows this index, the file was read.
+    CREATE INDEX IF NOT EXISTS notes_created_at_idx ON notes (created_at);
+    
+    INSERT INTO notes (body) VALUES
+        ('Welcome — this row came from the ConfigMap-mounted init.sql'),
+        ('Delete the postgres pod and refresh. Which notes survive?');

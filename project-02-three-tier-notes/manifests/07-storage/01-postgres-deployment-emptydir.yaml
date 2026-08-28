@@ -1,0 +1,108 @@
+# 07-storage/01-postgres-deployment-emptydir.yaml
+# WHAT CHANGED vs 06-secrets/postgres-deployment.yaml:
+#   The data directory is now a VOLUME instead of the container's writable layer.
+#
+# ⚠️ STILL BROKEN, and this is the point of the file. `emptyDir` is tied to the
+#    POD, not to the container. It survives a container CRASH — the kubelet
+#    restarts the container and the directory is still there — but it is deleted
+#    the instant the pod is removed. Delete the pod and the notes are gone again.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL on an emptyDir — survives container restarts, not pod deletion"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "emptydir,pod-scoped-storage,pgdata"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            # configMapKeyRef = ONE named key becomes ONE named variable.
+            # Explicit, greppable, and it fails loudly if the key is missing.
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_USER
+            # secretKeyRef looks identical to configMapKeyRef on purpose — the
+            # consumption API is the same. What differs is everything around
+            # the object: RBAC, describe output, encryption-at-rest, tmpfs.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            # PGDATA points at a SUBDIRECTORY of the mount point, never at the
+            # mount point itself. Mounting a volume at /var/lib/postgresql/data
+            # can leave a lost+found (or a root-owned empty dir) inside it, and
+            # Postgres refuses to initialise a non-empty directory. This single
+            # line is the most common cause of "my Postgres pod won't start".
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # (the init script mount, unchanged)
+            # subPath mounts ONE key as ONE file, leaving the rest of the target
+            # directory alone. Without it, mounting at /docker-entrypoint-initdb.d
+            # would replace the whole directory with the ConfigMap's contents.
+            #
+            # ⚠️ The trade-off: subPath mounts are NOT refreshed by the kubelet
+            #    when the ConfigMap changes. A whole-directory ConfigMap mount is
+            #    updated (~60s); a subPath mount is frozen for the pod's life.
+            #    For an init script that runs exactly once, that is irrelevant.
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/10-init.sql
+              subPath: init.sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        # An emptyDir is created empty when the pod is assigned to a node and
+        # DELETED when the pod leaves that node. It is scratch space with a
+        # pod-shaped lifetime — a cache, a scratch dir, a channel between two
+        # containers in the same pod. It is not persistence.
+        - name: data
+          emptyDir: {}
+        - name: init-sql
+          configMap:
+            name: postgres-init
+            # 0o444 — read-only for everyone. The entrypoint only needs to read it.
+            defaultMode: 0444

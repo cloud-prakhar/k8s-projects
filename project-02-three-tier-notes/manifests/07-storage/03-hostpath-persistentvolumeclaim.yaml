@@ -1,0 +1,30 @@
+# 07-storage/03-hostpath-persistentvolumeclaim.yaml
+#
+# 🧪 TEACHING ARTIFACT — the other half of the pair. Apply this and watch the
+#    PV flip from `Available` to `Bound` within a second. Nothing scheduled it,
+#    nothing provisioned it: the PersistentVolume controller simply found a PV
+#    that satisfied the request.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-hostpath-demo
+  namespace: notes-platform       # PVCs ARE namespaced; PVs are not
+  labels:
+    app.kubernetes.io/name: postgres-hostpath-demo
+    app.kubernetes.io/instance: postgres-hostpath-demo
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Teaching-only claim demonstrating static PV binding"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "persistentvolumeclaim,binding"
+spec:
+  # The three fields the controller matches on: class, access mode, size.
+  storageClassName: ""            # "" ⇒ only bind to a PV that also says ""
+  accessModes:
+    - ReadWriteOnce               # must be satisfiable by the PV's access modes
+  resources:
+    requests:
+      # A claim may bind to a LARGER volume — 1Gi requested can bind to a 5Gi PV,
+      # and you get 5Gi. It can never bind to a smaller one.
+      storage: 1Gi

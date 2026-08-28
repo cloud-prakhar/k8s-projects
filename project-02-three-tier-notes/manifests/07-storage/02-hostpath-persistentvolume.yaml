@@ -1,0 +1,57 @@
+# 07-storage/02-hostpath-persistentvolume.yaml
+#
+# 🧪 TEACHING ARTIFACT — apply it, look at it, delete it. The Notes Platform
+#    does NOT use this. It exists so you can see, once, what a PersistentVolume
+#    looks like when a human creates it by hand, before dynamic provisioning
+#    does it for you.
+#
+# ⚠️ NEVER use hostPath in a real cluster:
+#    • the data lives on ONE node's filesystem — reschedule the pod elsewhere
+#      and it silently starts with an empty directory
+#    • it is a container escape waiting to happen: a pod that can mount a host
+#      path can often mount /etc or the container runtime's socket
+#    • nothing backs it up, snapshots it, or resizes it
+#
+# WHY it is here anyway: it makes the PV/PVC handshake concrete. A PV is a piece
+# of storage that EXISTS. A PVC is a REQUEST for storage. Kubernetes matches
+# them. Everything dynamic provisioning does, it does by creating the PV half of
+# this pair for you.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  # PersistentVolumes are CLUSTER-SCOPED — no namespace field. They outlive the
+  # namespace that used them, which is why cleanup scripts must check for them.
+  name: notes-hostpath-demo
+  labels:
+    app.kubernetes.io/name: notes-hostpath-demo
+    app.kubernetes.io/instance: notes-hostpath-demo
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Teaching-only static PersistentVolume backed by a node directory"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "persistentvolume,static-provisioning,access-modes,reclaim-policy"
+spec:
+  capacity:
+    # This is a REQUEST-MATCHING number, not a quota. With hostPath nothing
+    # enforces it: write 10Gi into a 1Gi hostPath PV and it simply works until
+    # the node's disk fills. Real CSI drivers do enforce it.
+    storage: 1Gi
+  volumeMode: Filesystem          # the alternative is Block (raw device)
+  accessModes:
+    # ReadWriteOnce = mountable read-write by pods on ONE node at a time.
+    #   ReadWriteOncePod  — exactly one POD, cluster-wide (what a database wants)
+    #   ReadOnlyMany      — many nodes, read-only
+    #   ReadWriteMany     — many nodes, read-write (needs NFS/CephFS/EFS-class storage)
+    # Access modes are a matching hint, NOT an enforcement mechanism.
+    - ReadWriteOnce
+  # Retain = when the claim is deleted, KEEP the volume and its data. The PV
+  # goes to phase `Released` and is never reused until an admin cleans it up.
+  # The alternative, Delete, destroys the underlying storage with the claim.
+  persistentVolumeReclaimPolicy: Retain
+  # Empty string = "do not use any StorageClass". This is what makes the volume
+  # available for STATIC binding to a claim that also asks for "".
+  storageClassName: ""
+  hostPath:
+    path: /mnt/data/notes-postgres-demo
+    type: DirectoryOrCreate       # create it on the node if it isn't there

@@ -1,0 +1,148 @@
+# 11-health-checks/notes-api-deployment.yaml
+# WHAT CHANGED vs 06-secrets/notes-api-deployment.yaml:
+#   1. An INIT CONTAINER that blocks until PostgreSQL accepts connections.
+#   2. Three PROBES, each answering a different question:
+#
+#        startupProbe   — "have you finished booting?"   suspends the other two
+#        readinessProbe — "should I send you traffic?"   fail ⇒ removed from the
+#                                                        Service's endpoints
+#        livenessProbe  — "are you still working?"       fail ⇒ container RESTARTED
+#
+#   Note WHICH endpoint each one uses. Readiness hits /healthz, which opens a
+#   database connection. Liveness hits /livez, which deliberately does not.
+#   Swap them and a five-second database blip restarts every API pod at once.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-api
+    app.kubernetes.io/instance: notes-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes REST API — dependency-ordered start-up and health-probed"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "init-containers,readiness,liveness,startup-probe"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-api
+      app.kubernetes.io/instance: notes-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-api
+        app.kubernetes.io/instance: notes-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      initContainers:
+        # Init containers run to COMPLETION, in order, BEFORE any app container
+        # starts. If one fails it is retried according to the pod's restartPolicy,
+        # and the pod stays in `Init:0/1` — a status that means "your app never
+        # even started", not "your app is broken".
+        #
+        # WHY it is here: on a cold cluster the API pods are scheduled at the
+        # same moment as PostgreSQL and lose the race. Without this the API
+        # spends its first minute logging connection failures, and a stricter
+        # app than ours would CrashLoopBackOff.
+        #
+        # Reusing the postgres image costs nothing — it is already on the node —
+        # and it is the only image that ships pg_isready.
+        - name: wait-for-postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            # -h forces a TCP check. Without it pg_isready would test a local
+            # unix socket that does not exist in this container at all.
+            - |
+              until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+                echo "waiting for $POSTGRES_HOST:$POSTGRES_PORT …"
+                sleep 2
+              done
+              echo "postgres is accepting connections"
+          envFrom:
+            - configMapRef:
+                name: notes-config
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+      containers:
+        - name: notes-api
+          image: notes-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            # Every key in notes-config becomes an env var. Convenient, but note
+            # what you give up: you can no longer tell from this file WHICH
+            # variables the container receives. `kubectl exec … -- env` becomes
+            # the only honest answer.
+            - configMapRef:
+                name: notes-config
+          env:
+            # The one value that must never appear in a ConfigMap.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # STARTUP: until this succeeds, readiness and liveness are SUSPENDED.
+          # Budget = failureThreshold × periodSeconds = 30 × 1s = 30s to boot.
+          # This is what protects a slow starter from being killed by its own
+          # liveness probe before it has finished starting.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http          # reference the NAMED port, not a number
+            periodSeconds: 1
+            failureThreshold: 30
+
+          # READINESS: gates Service traffic, and is checked FOREVER, not once.
+          # /healthz opens a real database connection, so if PostgreSQL goes
+          # away these pods leave the EndpointSlice and clients get a clean
+          # failure instead of a timeout. They are NOT restarted.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3   # ~15s of failure before traffic is withdrawn
+
+          # LIVENESS: restarts the container. Be conservative. It points at
+          # /livez, which checks only that this process is answering — NEVER at
+          # a dependency. "The database is slow" must not mean "kill the API".
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

@@ -1,0 +1,71 @@
+# 03-deployments/postgres-deployment.yaml
+# WHY: The notes have to live somewhere. This runs PostgreSQL the way most
+#      people first try it — as an ordinary Deployment.
+#
+# ⚠️ BROKEN BY DESIGN, in two separate ways:
+#   1. NO VOLUME. Everything Postgres writes goes to the container's writable
+#      layer, which is destroyed with the container. Delete this pod and every
+#      note is gone. That failure motivates stage 07.
+#   2. The password is a PLAINTEXT LITERAL in a manifest that lives in Git.
+#      That motivates stage 06.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL for the Notes Platform — no volume yet, data is ephemeral"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,ephemeral-storage,plaintext-credentials"
+spec:
+  # ONE replica, and it stays one for the whole of stage 03–07. Two Postgres
+  # pods behind one Service would be two INDEPENDENT databases answering the
+  # same requests at random — silent, unfixable data divergence, not "scaling".
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  strategy:
+    # Recreate, NOT RollingUpdate. A rolling update would briefly run two
+    # database pods at once; once a volume is attached in stage 07 that means
+    # two processes opening the same data directory. Postgres refuses, and on
+    # filesystems that allow it you get corruption.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine     # explicit tag, never :latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "notes"
+            - name: POSTGRES_USER
+              value: "notes"
+            # ⚠️ PLAINTEXT CREDENTIAL IN GIT — fixed in stage 06.
+            - name: POSTGRES_PASSWORD
+              value: "devpassword"
+          resources:
+            # requests only. Limits, QoS classes and what happens when you get
+            # them wrong are Project 05's subject.
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

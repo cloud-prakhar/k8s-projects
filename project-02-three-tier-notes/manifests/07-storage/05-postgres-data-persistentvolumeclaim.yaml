@@ -1,0 +1,35 @@
+# 07-storage/05-postgres-data-persistentvolumeclaim.yaml
+# WHY: This is the real one. No PersistentVolume is written by hand anywhere —
+#      the claim names a StorageClass, the provisioner sees the claim and
+#      creates a matching PV automatically. That is the workflow you will use
+#      for the rest of your Kubernetes career.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres-data
+    app.kubernetes.io/instance: postgres-data
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Durable storage for the PostgreSQL data directory"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "pvc,dynamic-provisioning,storageclass"
+spec:
+  # Kind ships this class and marks it default. On EKS it would be `gp3`, on
+  # GKE `standard-rwo`. OMITTING storageClassName entirely uses the cluster's
+  # DEFAULT class — convenient, and the reason the same manifest behaves
+  # differently on two clusters. Naming it is the honest choice.
+  storageClassName: standard
+  accessModes:
+    # One database process, one writer. ReadWriteOnce is correct here.
+    # ReadWriteMany would not make Postgres clusterable — two Postgres
+    # processes on one data directory corrupt it. Multi-writer databases
+    # replicate; they do not share a filesystem.
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,39 @@
+# 09-ingress/01-ingressclass-reference.yaml
+#
+# 📖 READ THIS FILE — DO NOT APPLY IT.
+#    The ingress-nginx installation already created this exact object. It is
+#    reproduced here because an IngressClass is usually installed by somebody
+#    else's Helm chart and never read, and it is the object that answers the
+#    single most common Ingress question: "why is my Ingress doing nothing?"
+#
+#    Compare it with the real one:
+#      kubectl get ingressclass nginx -o yaml
+#
+# WHAT IT IS: an IngressClass is the link between an Ingress resource and the
+# CONTROLLER that is supposed to act on it. Kubernetes ships no ingress
+# implementation at all — the Ingress object is a request that sits inert unless
+# some controller is watching for its class and configuring a real proxy.
+#
+# An Ingress with `ingressClassName: nginx` says: "whichever controller claims
+# the `nginx` class, this is for you." Every other controller ignores it. That
+# is how one cluster runs nginx, Traefik and an AWS ALB controller side by side.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  # IngressClasses are CLUSTER-SCOPED — no namespace.
+  name: nginx
+  annotations:
+    kubernetes.io/description: "Reference copy of the IngressClass created by the ingress-nginx install"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingressclass,controller-vs-resource"
+    # Setting this to "true" makes the class the cluster DEFAULT: Ingress
+    # objects that omit ingressClassName get assigned to it. The ingress-nginx
+    # Kind manifest does NOT set it, which is why omitting ingressClassName on
+    # a Kind cluster produces an Ingress that nothing ever picks up.
+    ingressclass.kubernetes.io/is-default-class: "false"
+spec:
+  # The controller's identity string, chosen by the controller's authors and
+  # matched by the controller's own `--controller-class` flag. It is not a
+  # Kubernetes API reference and there is nothing to resolve — it is a label
+  # both sides agree on.
+  controller: k8s.io/ingress-nginx

@@ -1,0 +1,45 @@
+# 08-statefulsets/01-postgres-headless-service.yaml
+# WHY: A normal ClusterIP Service deliberately HIDES which pod you reached — it
+#      hands you one virtual IP and load-balances behind it. For a stateful set
+#      of pods that is exactly wrong: you often need to address ONE specific
+#      member ("connect to the primary", "replicate from postgres-0").
+#
+#      A headless Service (clusterIP: None) allocates no virtual IP. DNS returns
+#      the POD IPs directly, and — because a StatefulSet names it in
+#      `serviceName` — it also creates one DNS record per pod:
+#
+#          postgres-0.postgres-headless.notes-platform.svc.cluster.local
+#
+#      That name belongs to pod ordinal 0 forever, no matter how often it is
+#      rescheduled or which IP it gets.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Headless Service giving each PostgreSQL pod a stable DNS name"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns,stable-network-identity"
+spec:
+  # THE line that makes it headless. Not a type — ClusterIP with no IP.
+  clusterIP: None
+  # Give pods their DNS name as soon as they exist, before they are Ready.
+  # StatefulSet members must be able to find each other DURING start-up, which
+  # is precisely when they are not yet Ready. Leave this false and an ordered
+  # cluster bootstrap deadlocks waiting for names that do not resolve yet.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP

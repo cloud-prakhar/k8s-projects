@@ -1,0 +1,146 @@
+# 08-statefulsets/02-postgres-statefulset.yaml
+# WHY: A Deployment treats its pods as interchangeable. It gives them random
+#      names, starts and stops them in no particular order, and — crucially —
+#      points every replica at the SAME PersistentVolumeClaim. That is fine for
+#      a web tier and catastrophic for a database.
+#
+#      A StatefulSet gives each pod:
+#        • a stable ORDINAL NAME          postgres-0, postgres-1, …
+#        • a stable DNS NAME              postgres-0.postgres-headless.…
+#        • its OWN PersistentVolumeClaim  postgres-data-postgres-0, …
+#        • ordered, one-at-a-time start-up, shutdown and rolling updates
+#
+# ⚠️ Delete the stage 07 Deployment BEFORE applying this. Both objects create
+#    pods carrying the same labels, so leaving both running gives you two
+#    databases behind one Service, answering at random.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL as a StatefulSet — stable identity and a per-pod volume"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "statefulset,volumeclaimtemplates,ordered-lifecycle,stable-identity"
+spec:
+  # The headless Service that owns the per-pod DNS names. This field is NOT
+  # optional and NOT automatic: name a Service that does not exist and the pods
+  # still start, but `postgres-0.postgres-headless…` never resolves.
+  serviceName: postgres-headless
+  # Still ONE replica. A second replica would be a second, EMPTY database with
+  # its own volume — not a replica of the first. PostgreSQL replication is
+  # configured inside PostgreSQL (primary/standby, WAL streaming); Kubernetes
+  # only supplies identity and storage. Project 03 scales a StatefulSet whose
+  # software CAN cluster (Redis); the honest answer for Postgres in production
+  # is an operator such as CloudNativePG.
+  replicas: 1
+  revisionHistoryLimit: 5
+  # Like a Deployment's, this selector is IMMUTABLE. Keep it minimal.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  # OrderedReady: pods are created 0,1,2… and each must be Running AND Ready
+  # before the next begins; on scale-down they are removed in reverse. The
+  # alternative, `Parallel`, starts them all at once — right for members that do
+  # not need to bootstrap from each other.
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    # RollingUpdate on a StatefulSet walks from the HIGHEST ordinal down, one
+    # pod at a time, waiting for Ready. `partition: N` updates only ordinals
+    # ≥ N, which is how canary upgrades of stateful systems are done.
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "17.5"
+    spec:
+      # Give Postgres time to finish a clean shutdown before SIGKILL. The
+      # default 30s is usually enough for a small database; a large one needs
+      # more, and killing it mid-checkpoint means crash recovery on next boot.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            # The name matches the volumeClaimTemplate below, NOT a volume in a
+            # `volumes:` list. There is no `volumes:` entry for it at all.
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/10-init.sql
+              subPath: init.sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init
+            defaultMode: 0444
+  # THE feature that separates a StatefulSet from a Deployment. This is a
+  # TEMPLATE: the controller stamps out one real PVC per pod, named
+  # <template-name>-<statefulset-name>-<ordinal> → postgres-data-postgres-0.
+  #
+  # ⚠️ Those PVCs are NOT garbage-collected when the StatefulSet is deleted.
+  #    That is deliberate — deleting a workload should not destroy its data —
+  #    and it is why `kubectl delete statefulset` followed by `kubectl get pvc`
+  #    surprises people. Recreate the StatefulSet and pod 0 reattaches to its
+  #    old volume, data intact.
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/instance: postgres
+          app.kubernetes.io/component: database
+          app.kubernetes.io/part-of: notes-platform
+        annotations:
+          kubernetes.io/description: "Per-pod durable storage for the PostgreSQL data directory"
+      spec:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

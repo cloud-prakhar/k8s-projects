@@ -5,8 +5,9 @@ Learn Kubernetes by **deploying real applications end-to-end** — not by readin
 Every project starts with a working application and a plain `kubectl run`-level deployment, then introduces Kubernetes
 resources **one at a time, only when the application actually breaks without them**.
 
-> **Status:** Repository design complete. **[Project 01](project-01-task-tracker-webapp/) is built** and is the
-> reference implementation every later project mirrors. Projects 02–10 are next — see [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Repository design complete. **[Project 01](project-01-task-tracker-webapp/)** (the reference
+> implementation every later project mirrors) and **[Project 02](project-02-three-tier-notes/)** are built.
+> Projects 03–10 are next — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -40,6 +41,7 @@ cd project-01-task-tracker-webapp && cat README.md
 | I want to… | Go to |
 |---|---|
 | **Start learning** | [Project 01](project-01-task-tracker-webapp/) — everything you need is inside it |
+| Learn storage, StatefulSets and Ingress | [Project 02](project-02-three-tier-notes/) — do Project 01 first |
 | Type every command myself, explained | that project's [`scripts/manual-steps.md`](project-01-task-tracker-webapp/scripts/manual-steps.md) |
 | See which project teaches what | [Resource coverage matrix](docs/RESOURCE-COVERAGE-MATRIX.md) |
 | Understand the project line-up | [Roadmap](docs/ROADMAP.md) |
@@ -130,7 +132,7 @@ Do the projects in order the first time. After that, each one stands alone as a 
 | # | Project | Difficulty | Application | Headline Kubernetes Concepts |
 |---|---|---|---|---|
 | 01 | [**Task Tracker Web App** ✅](project-01-task-tracker-webapp/) | Beginner | Python web tier + REST API | Namespace, Pod, ReplicaSet, Deployment, Service, ConfigMap, Secret |
-| 02 | [Three-Tier Notes Platform](docs/ROADMAP.md#project-02--three-tier-notes-platform) | Beginner+ | Frontend + API + PostgreSQL | PV, PVC, StorageClass, StatefulSet, probes, Ingress, NodePort |
+| 02 | [**Three-Tier Notes Platform** ✅](project-02-three-tier-notes/) | Beginner+ | Frontend + API + PostgreSQL | PV, PVC, StorageClass, StatefulSet, headless Service, Ingress, IngressClass, NodePort, LoadBalancer, probes, init containers |
 | 03 | [URL Shortener](docs/ROADMAP.md#project-03--url-shortener) | Intermediate | UI + API + Redis + Postgres | Headless Service, DNS, service discovery, ExternalName, immutable ConfigMaps |
 | 04 | [E-Commerce Microservices](docs/ROADMAP.md#project-04--e-commerce-microservices) | Intermediate | 5 services + gateway | Ingress path/host routing, NetworkPolicy, east-west traffic, EndpointSlice |
 | 05 | [Production Web Platform](docs/ROADMAP.md#project-05--production-web-platform) | Intermediate+ | Traffic-serving web app | requests/limits, QoS, HPA, PDB, rolling update, rollback, preStop, graceful shutdown |

@@ -1,0 +1,63 @@
+# 03-deployments/notes-web-deployment.yaml
+# WHY: The presentation tier, deployed the same way as everything else.
+#
+# ⚠️ BROKEN BY DESIGN: NOTES_API_URL is a HARDCODED POD IP, and there is no way
+#    to spread requests across both API replicas. Stage 04 fixes both.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes web UI — serves the page and proxies /api to notes-api"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,pod-ip-instability"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-web
+      app.kubernetes.io/instance: notes-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-web
+        app.kubernetes.io/instance: notes-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-web
+          image: notes-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # ⚠️ BROKEN BY DESIGN — a Pod IP again, this time pointing at one
+            #    single API replica. The other replica receives nothing.
+            - name: NOTES_API_URL
+              value: "http://10.244.0.98:8080"
+            - name: APP_ENV
+              value: "development"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

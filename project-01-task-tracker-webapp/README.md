@@ -478,4 +478,4 @@ Pod.**
 Project 02 adds PostgreSQL, watches the data disappear, and introduces PersistentVolumes, PVCs, StorageClasses,
 StatefulSets, and real external access via Ingress.
 
-→ **Project 02 — Three-Tier Notes Platform**
+→ **[Project 02 — Three-Tier Notes Platform](../project-02-three-tier-notes/README.md)**

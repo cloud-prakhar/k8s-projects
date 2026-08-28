@@ -40,7 +40,7 @@ Which project teaches which resource, and at what depth.
 | IngressClass | — | 🟩 | 🟨 | 🟨 | — | — | — | — | — | 🟨 |
 | EndpointSlice | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | — | — | 🟨 | 🟨 | — |
 | CoreDNS / service discovery | 🟩 | 🟨 | 🟩 | 🟩 | — | 🟨 | — | 🟨 | — | 🟨 |
-| NetworkPolicy | — | — | — | 🟩 | — | — | 🟩 | 🟨 | — | 🟨 |
+| NetworkPolicy | — | 🔵 | — | 🟩 | — | — | 🟩 | 🟨 | — | 🟨 |
 | Port forwarding | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 |
 | Session affinity | — | — | — | 🟨 | 🔵 | — | — | — | — | 🟨 |
 | CNI internals | 🔵 | — | — | 🔵 | — | — | 🔵 | — | 🔵 | 🔵 |
@@ -75,7 +75,7 @@ Which project teaches which resource, and at what depth.
 | Reclaim policy | — | 🟩 | 🟨 | — | — | — | — | — | — | 🟨 |
 | `volumeClaimTemplates` | — | 🟩 | 🟩 | — | — | — | — | 🟨 | 🟨 | 🟨 |
 | Projected volumes | — | — | — | — | — | 🟩 | 🟨 | — | — | — |
-| Volume snapshots | — | — | — | — | — | — | — | — | — | 🔵 |
+| Volume snapshots | — | 🔵 | — | — | — | — | — | — | — | 🔵 |
 
 ³ `gp3` StorageClass backed by the EBS CSI driver.
 
@@ -85,7 +85,7 @@ Which project teaches which resource, and at what depth.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Manual / replica scaling | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | — | — | 🟨 | 🟨 |
 | CPU/memory requests | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
-| CPU/memory limits | — | 🟨 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
+| CPU/memory limits | — | — | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
 | QoS classes | — | — | — | — | 🟩 | — | 🟨 | — | 🟨 | — |
 | LimitRange | — | — | — | — | 🟩 | — | 🟩 | — | — | 🟨 |
 | ResourceQuota | — | — | — | — | 🟨 | — | 🟩 | — | — | 🟨 |
@@ -102,11 +102,11 @@ Which project teaches which resource, and at what depth.
 | Self-healing / restart policy | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 | — | — | 🟨 | — |
 | Readiness probe | 🟩 | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 |
 | Liveness probe | 🟩 | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
-| Startup probe | 🟩 | — | 🟨 | — | 🟩 | — | — | 🟨 | — | 🟨 |
+| Startup probe | 🟩 | 🟨 | 🟨 | — | 🟩 | — | — | 🟨 | — | 🟨 |
 | Rolling update strategy | 🟩 | 🟨 | 🟨 | 🟨 | 🟩 | — | — | 🟨 | 🟨 | 🟨 |
 | Rollback | 🟩 | 🟨 | — | 🟨 | 🟩 | — | — | — | — | 🟩 |
-| PodDisruptionBudget | — | — | — | — | 🟩 | — | — | — | 🟩 | 🟨 |
-| Graceful termination / preStop | — | — | 🟨 | — | 🟩 | 🟨 | — | — | 🟨 | 🟨 |
+| PodDisruptionBudget | — | 🔵 | — | — | 🟩 | — | — | — | 🟩 | 🟨 |
+| Graceful termination / preStop | — | 🔵 | 🟨 | — | 🟩 | 🟨 | — | — | 🟨 | 🟨 |
 | Canary / blue-green | — | — | — | 🔵 | 🟩 | — | — | — | — | 🟩 |
 
 ## Scheduling
@@ -149,8 +149,8 @@ Which project teaches which resource, and at what depth.
 | Init containers | — | 🟩 | 🟩 | 🟨 | — | 🟩 | 🟨 | 🟨 | — | 🟨 |
 | Sidecar containers | — | — | 🟨 | — | — | 🟩 | 🟨 | 🟩 | — | 🟨 |
 | Lifecycle hooks (postStart/preStop) | — | — | — | — | 🟩 | 🟩 | — | — | 🟨 | 🟨 |
-| Downward API | 🟩 | — | — | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | — | — |
-| Ephemeral debug containers | — | 🔵 | — | 🟨 | — | — | — | 🟩 | — | — |
+| Downward API | 🟩 | 🟨 | — | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | — | — |
+| Ephemeral debug containers | — | — | — | 🟨 | — | — | — | 🟩 | — | — |
 
 ## Delivery & Observability
 

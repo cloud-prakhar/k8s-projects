@@ -1,0 +1,63 @@
+# 09-ingress/02-notes-ingress.yaml
+# WHY: Up to now the only way into the application has been `kubectl
+#      port-forward` — a foreground process, one Service at a time, on a
+#      developer's laptop, that dies with the terminal. Exposing each Service
+#      externally instead would mean one external address per Service and no
+#      way to serve `/` and `/api` from the same hostname.
+#
+#      An Ingress is a set of HTTP ROUTING RULES: hostnames and paths mapped to
+#      Services. One entry point, many backends, TLS terminated in one place.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notes-ingress
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-ingress
+    app.kubernetes.io/instance: notes-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "HTTP routing for the Notes Platform: / to the UI, /api to the API"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingress,path-routing,ingressclass"
+    # Controller-SPECIFIC settings live in annotations, and every controller has
+    # its own vocabulary. This one caps the request body — an nginx default of
+    # 1m surprises people uploading files. Portable Ingress ends where the
+    # annotations begin; that gap is why the Gateway API exists.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+spec:
+  # Which controller should implement this. Get it wrong (or omit it on a
+  # cluster with no default class) and the Ingress is created successfully,
+  # reports no error, and does absolutely nothing.
+  ingressClassName: nginx
+  rules:
+    # A made-up hostname. Add it to /etc/hosts pointing at 127.0.0.1 — Ingress
+    # matches on the HTTP Host header, so a name that resolves anywhere useful
+    # is enough. Real clusters point a real DNS record at the load balancer.
+    - host: notes.local
+      http:
+        paths:
+          # MOST SPECIFIC FIRST is good practice for readability, though
+          # nginx matches the longest prefix regardless of order here.
+          - path: /api
+            # Prefix   — /api matches /api, /api/notes, /api/anything
+            # Exact    — only the exact string
+            # ImplementationSpecific — whatever the controller decides (avoid)
+            pathType: Prefix
+            backend:
+              service:
+                name: notes-api
+                port:
+                  # The SERVICE port, not the container port. Naming the port
+                  # instead of numbering it (`name: http`) also works and
+                  # survives a port renumbering.
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: notes-web
+                port:
+                  number: 80

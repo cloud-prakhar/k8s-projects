@@ -1,0 +1,69 @@
+# 05-configmaps/notes-web-deployment.yaml
+# WHAT CHANGED vs 04-services/notes-web-deployment-patched.yaml:
+#   NOTES_API_URL and APP_ENV are read from the ConfigMap instead of being
+#   written here. The web tier and the API tier now agree by construction.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-web
+  namespace: notes-platform
+  labels:
+    app.kubernetes.io/name: notes-web
+    app.kubernetes.io/instance: notes-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: notes-platform
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Notes web UI — configuration supplied by ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmapkeyref"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-web
+      app.kubernetes.io/instance: notes-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notes-web
+        app.kubernetes.io/instance: notes-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: notes-platform
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: notes-web
+          image: notes-web:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Named keys rather than envFrom: this tier only needs two settings,
+            # and the database credentials have no business being in its
+            # environment at all. Give each container the smallest env you can.
+            - name: NOTES_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: NOTES_API_URL
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: notes-config
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
