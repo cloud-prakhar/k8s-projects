@@ -40,7 +40,7 @@ spec:
     spec:
       containers:
         - name: notes-api
-          image: notes-api:1.0.0
+          image: cloudprakhargupta/notes-app:api-1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

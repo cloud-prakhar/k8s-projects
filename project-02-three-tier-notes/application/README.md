@@ -9,8 +9,8 @@ part, the Kubernetes objects around it are.
 
 | Directory | Image | Language / stack | Port | State |
 |---|---|---|---|---|
-| [`frontend/`](frontend/) | `notes-web:1.0.0` | Python 3.13 · Flask · gunicorn | 8080 | none |
-| [`backend/`](backend/) | `notes-api:1.0.0` | Python 3.13 · Flask · gunicorn · psycopg 3 | 8080 | none |
+| [`frontend/`](frontend/) | `cloudprakhargupta/notes-app:web-1.0.0` | Python 3.13 · Flask · gunicorn | 8080 | none |
+| [`backend/`](backend/) | `cloudprakhargupta/notes-app:api-1.0.0` | Python 3.13 · Flask · gunicorn · psycopg 3 | 8080 | none |
 | [`database/`](database/) | `postgres:17.5-alpine` | PostgreSQL 17 | 5432 | **all of it** |
 
 ---
@@ -53,11 +53,11 @@ sleep 12
 docker run -d --name notes-api --network notes-test \
   -e POSTGRES_HOST=pg -e POSTGRES_DB=notes -e POSTGRES_USER=notes \
   -e POSTGRES_PASSWORD=devpassword -e POD_NAME=local-api \
-  -p 18081:8080 notes-api:1.0.0
+  -p 18081:8080 cloudprakhargupta/notes-app:api-1.0.0
 
 docker run -d --name notes-web --network notes-test \
   -e NOTES_API_URL=http://notes-api:8080 -e POD_NAME=local-web \
-  -p 18080:8080 notes-web:1.0.0
+  -p 18080:8080 cloudprakhargupta/notes-app:web-1.0.0
 
 sleep 5
 curl -s localhost:18080/api/info; echo
@@ -91,15 +91,30 @@ docker rm -f pg notes-api notes-web && docker network rm notes-test
 
 ## Build for the cluster
 
+Both images live in one repository, separated by a tag prefix:
+
 ```bash
-docker build -t notes-api:1.0.0 backend
-docker build -t notes-web:1.0.0 frontend
-kind load docker-image notes-api:1.0.0 --name kubernetes-lab
-kind load docker-image notes-web:1.0.0 --name kubernetes-lab
+docker login
+docker build -t cloudprakhargupta/notes-app:api-1.0.0 backend
+docker build -t cloudprakhargupta/notes-app:web-1.0.0 frontend
+docker push cloudprakhargupta/notes-app:api-1.0.0
+docker push cloudprakhargupta/notes-app:web-1.0.0
 ```
 
-The `kind load` step is not optional — a Kind node has its own image store.
-Skip it and you get `ImagePullBackOff`.
+The push is not optional — a node has its own image store, and an image that
+exists only in your laptop's Docker daemon is invisible to the kubelet. Skip it
+and you get `ImagePullBackOff`.
+
+Side-loading (`kind load`, `ctr images import`, `minikube image load`) is faster
+but is a different command on every platform and does not exist on EKS. A
+registry is the one mechanism that works identically on Kind, kubeadm and EKS,
+so it is the one this project uses. Publishing elsewhere is a one-line change:
+
+```bash
+IMAGE_REPO=<acct>.dkr.ecr.<region>.amazonaws.com/notes-app ../scripts/build-images.sh
+```
+
+then set the same value in `manifests/19-final/kustomization.yaml` (`images:`).
 
 ---
 

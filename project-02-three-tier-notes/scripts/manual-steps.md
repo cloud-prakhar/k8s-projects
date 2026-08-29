@@ -100,8 +100,24 @@ stage 07 will sit `Pending`.
 
 ## Step 1.3 — Install the NGINX Ingress Controller
 
+The controller is the **one** part of this project that differs per platform,
+because the platforms genuinely differ in how outside traffic gets in.
+ingress-nginx ships one manifest per provider — pick yours:
+
+| Cluster | `<provider>` | How traffic reaches the controller |
+|---|---|---|
+| Kind | `kind` | `hostPort: 80/443` on a node labelled `ingress-ready=true` |
+| kubeadm / bare metal | `baremetal` | a `NodePort` on every node |
+| EKS / GKE / AKS | `cloud` | a `Service` type `LoadBalancer` the cloud provisions |
+
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml
+PROVIDER=kind    # or baremetal, or cloud
+
+# Kind only, and only if the cluster was NOT built from clusters/kind-ingress.yaml:
+kubectl label node "$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')" \
+  ingress-ready=true --overwrite
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/${PROVIDER}/deploy.yaml
 
 kubectl wait --namespace ingress-nginx \
   --for=condition=Ready pod \
@@ -109,11 +125,16 @@ kubectl wait --namespace ingress-nginx \
   --timeout=180s
 ```
 
+> **Not sure which you are on?** The node knows:
+> `kubectl get nodes -o jsonpath='{.items[0].spec.providerID}'` — `kind://…`,
+> `aws://…`, or empty for kubeadm. `deploy.sh` reads exactly this field and
+> picks the provider for you.
+
 ▸ **What it does:** installs the ingress controller — a Deployment, a Service, an
 **IngressClass** named `nginx`, RBAC and admission webhooks — into a new
 `ingress-nginx` namespace. The `kind`-specific manifest configures the controller
 pod with `hostPort: 80/443`, which is how traffic reaches it without a cloud load
-balancer. `kubectl wait` blocks until the controller pod passes its readiness
+balancer; the `cloud` manifest asks for a real load balancer instead. `kubectl wait` blocks until the controller pod passes its readiness
 probe.
 
 ▸ **Expected output:**
@@ -130,26 +151,64 @@ pod/ingress-nginx-controller-… condition met
 scheduled — check `kubectl get pods -n ingress-nginx` and
 `kubectl describe pod -n ingress-nginx`. If it is `Pending` with a nodeSelector
 message, your cluster was not created from `kind-ingress.yaml` and no node
-carries `ingress-ready=true`.
+carries `ingress-ready=true` — apply the label above. On `cloud`, an
+`EXTERNAL-IP` stuck at `<pending>` means no cloud controller manager is running
+(you are not on the platform you think you are).
 
 > This is **cluster software**, installed once, shared by every project. It is
 > not part of the Notes Platform, which is why `cleanup.sh` leaves it running.
 
 ---
 
-# Part 2 — Build and load the images
+# Part 2 — Build and publish the images
+
+The cluster cannot run an image it cannot fetch. There are two ways to give it
+one, and the difference matters:
+
+| | Side-load | **Registry (what this project uses)** |
+|---|---|---|
+| Command | `kind load` / `ctr images import` / `minikube image load` | `docker push` |
+| Works on Kind | ✅ | ✅ |
+| Works on kubeadm | ❌ (different command) | ✅ |
+| Works on EKS | ❌ (no such thing) | ✅ |
+| Multi-node | copies to every node | nodes pull what they schedule |
+
+A side-load is faster on a laptop, but it is a *different command on every
+platform* and it does not exist at all on a managed cluster. A registry is the
+one mechanism that is identical everywhere, so it is the one taught here. On EKS
+you change `IMAGE_REPO` to an ECR address; nothing else in this project moves.
+
+Both images live in **one repository, separated by tag prefix**:
+`cloudprakhargupta/notes-app:api-1.0.0` and `:web-1.0.0`.
+
+## Step 2.0 — Authenticate to the registry
+
+```bash
+docker login
+# ECR instead:
+# aws ecr get-login-password --region <region> \
+#   | docker login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
+```
+
+▸ **What it does:** stores a credential the next `docker push` will use. Pulling
+a *public* image needs no login; pushing always does.
+
+▸ **If it fails:** `denied: requested access to the resource is denied` on push
+means you are pushing to a repository your account does not own — set
+`IMAGE_REPO` to one you do.
 
 ## Step 2.1 — Build the API image
 
 ```bash
-docker build -t notes-api:1.0.0 application/backend
+docker build -t cloudprakhargupta/notes-app:api-1.0.0 application/backend
 ```
 
 ▸ **What it does:** runs the two-stage Dockerfile — dependencies into a
 virtualenv in a build stage, then only that virtualenv copied into a clean
 runtime image. The result runs as UID 10001, not root.
 
-▸ **Expected output:** ends with `naming to docker.io/library/notes-api:1.0.0`.
+▸ **Expected output:** ends with
+`naming to docker.io/cloudprakhargupta/notes-app:api-1.0.0`.
 
 ▸ **If it fails:** *"Cannot connect to the Docker daemon"* — Docker is not
 running. A pip resolution error — check `application/backend/requirements.txt`;
@@ -158,45 +217,45 @@ every version is pinned deliberately.
 ## Step 2.2 — Build the web image
 
 ```bash
-docker build -t notes-web:1.0.0 application/frontend
+docker build -t cloudprakhargupta/notes-app:web-1.0.0 application/frontend
 ```
 
 ▸ **What it does:** same shape, plus `COPY static /static` for the UI.
 
-## Step 2.3 — Load both images into the cluster
+## Step 2.3 — Push both images
 
 ```bash
-kind load docker-image notes-api:1.0.0 --name kubernetes-lab
-kind load docker-image notes-web:1.0.0 --name kubernetes-lab
+docker push cloudprakhargupta/notes-app:api-1.0.0
+docker push cloudprakhargupta/notes-app:web-1.0.0
 ```
 
-▸ **What it does:** a Kind "node" is a Docker container with **its own image
-store**. An image in your laptop's daemon is invisible to it. This copies the
-images into every node's store.
+▸ **What it does:** uploads the layers the registry does not already have, then
+the manifest. The kubelet on every node can now pull these by name.
 
-▸ **Expected output:**
+▸ **Expected output:** ends with
+`api-1.0.0: digest: sha256:… size: 856`.
 
-```
-Image: "notes-api:1.0.0" with ID "sha256:…" not yet present on node "kubernetes-lab-worker", loading...
-```
+▸ **If it fails:** `denied` — see Step 2.0. `no basic auth credentials` — the
+login expired; run `docker login` again.
 
-▸ **If it fails:** *"image not found"* — the build did not tag what you think;
-check `docker images | grep notes-`.
+> **Skip Part 2 entirely and you get `ErrImagePull` / `ImagePullBackOff`,**
+> because the kubelet asks the registry for a tag that was never published.
+> That is failure lab 1.
 
-> **Skip this and you get `ErrImagePull` / `ImagePullBackOff`,** because the
-> kubelet falls back to pulling `notes-api:1.0.0` from Docker Hub, where it does
-> not exist. That is failure lab 1.
-
-## Step 2.4 — Pre-pull PostgreSQL
+## Step 2.4 — Verify the tags are really in the registry
 
 ```bash
-docker pull postgres:17.5-alpine
-kind load docker-image postgres:17.5-alpine --name kubernetes-lab
+docker manifest inspect cloudprakhargupta/notes-app:api-1.0.0 >/dev/null && echo OK
 ```
 
-▸ **What it does:** PostgreSQL is a public image the kubelet *can* pull, but it
-is ~100 MB and the first deploy otherwise sits in `ContainerCreating` looking
-broken. Optional but kind to yourself.
+▸ **What it does:** asks the registry for the manifest without downloading the
+image. This is the check that separates "I built it" from "the cluster can get
+it" — the exact gap that causes `ImagePullBackOff`.
+
+> **Note:** `imagePullPolicy: IfNotPresent` in the manifests means each node
+> pulls once and reuses the cached copy. Repush the *same* tag with different
+> content and nodes that already cached it will not notice — which is precisely
+> why tags are immutable in practice and `:latest` is banned.
 
 ## Step 2.5 (optional but recommended) — run all three tiers in plain Docker first
 
@@ -210,9 +269,9 @@ docker run -d --name pg --network notes-test \
 sleep 12
 docker run -d --name notes-api --network notes-test \
   -e POSTGRES_HOST=pg -e POSTGRES_DB=notes -e POSTGRES_USER=notes \
-  -e POSTGRES_PASSWORD=devpassword -e POD_NAME=local-api -p 18081:8080 notes-api:1.0.0
+  -e POSTGRES_PASSWORD=devpassword -e POD_NAME=local-api -p 18081:8080 cloudprakhargupta/notes-app:api-1.0.0
 docker run -d --name notes-web --network notes-test \
-  -e NOTES_API_URL=http://notes-api:8080 -e POD_NAME=local-web -p 18080:8080 notes-web:1.0.0
+  -e NOTES_API_URL=http://notes-api:8080 -e POD_NAME=local-web -p 18080:8080 cloudprakhargupta/notes-app:web-1.0.0
 sleep 5
 curl -s localhost:18080/api/info; echo
 curl -sX POST localhost:18080/api/notes -H 'Content-Type: application/json' -d '{"body":"hello"}'
@@ -561,6 +620,32 @@ curl -s http://notes.local/api/notes | head -c 120; echo
 curl -s -H 'Host: notes.local' http://localhost/api/notes | head -c 120; echo
 ```
 
+▸ **No host port 80?** Only a Kind cluster built from `clusters/kind-ingress.yaml`
+maps port 80 into the node. On kubeadm, EKS, or a Kind cluster someone else
+created, forward the controller's Service instead — this works on **every**
+cluster and needs neither DNS nor root:
+
+```bash
+kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80
+curl -s -H 'Host: notes.local' http://localhost:8080/api/notes | head -c 120; echo
+```
+
+▸ **Got a 200 that is not your app?** Port 80 is the most contested port on a
+developer machine — Apache, nginx, or another project's ingress may already own
+it and answer 200 to *anything*, including a Host header it has never heard of.
+Two questions settle it in one command each:
+
+```bash
+curl -sI http://localhost/ | grep -i server     # who is answering?
+curl -s -H 'Host: definitely-wrong.local' -o /dev/null -w '%{http_code}\n' http://localhost/
+```
+
+The real ingress returns **404** for an unknown host, because no `Ingress` rule
+matches it. A server that returns 200 for `definitely-wrong.local` is not
+routing by host at all, and is therefore not the ingress controller. Use the
+port-forward above instead — it talks to the controller's Service directly and
+cannot be intercepted by anything on your machine.
+
 ▸ **If it fails:** `Connection refused` on port 80 means the cluster was not
 created from `clusters/kind-ingress.yaml`. `404` means no rule matched your Host
 header. `503` means the rule matched but the backend has no ready endpoints.
@@ -742,6 +827,16 @@ curl -s -o /dev/null -w 'ui: %{http_code}\n' -H 'Host: notes.local' http://local
 
 ▸ **Expected output:** JSON, then `ui: 200`.
 
+▸ **`Connection refused`?** There is no host port 80 on this cluster — that is a
+property of the cluster, not a fault in the Ingress. Reach the controller
+through a port-forward, which behaves the same on Kind, kubeadm and EKS
+(`validate.sh` falls back to exactly this):
+
+```bash
+kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80 &
+curl -fsS -H 'Host: notes.local' http://localhost:8080/api/notes | head -c 120; echo
+```
+
 ▸ **If it fails:** see the 404 / 502 / 503 table in
 [stage 09 §9](../manifests/09-ingress/README.md).
 
@@ -842,7 +937,7 @@ projects, which is why `cleanup.sh` leaves it running.
 
 ```bash
 kind delete cluster --name kubernetes-lab
-docker rmi notes-api:1.0.0 notes-web:1.0.0
+docker rmi cloudprakhargupta/notes-app:api-1.0.0 cloudprakhargupta/notes-app:web-1.0.0
 ```
 
 ▸ Removes the cluster entirely, images and all. Rebuilding takes about a minute
@@ -876,7 +971,7 @@ docker rmi notes-api:1.0.0 notes-web:1.0.0
 | `kubectl auth can-i <verb> <resource>` | Check RBAC, optionally `--as` another identity |
 | `kubectl run <name> --rm -it --image=<img> -- <cmd>` | Throwaway debug pod |
 | `kubectl delete namespace <ns>` | Delete everything namespaced in one command |
-| `kind load docker-image <img> --name <cluster>` | Copy a local image into the cluster's nodes |
+| `docker push <repo>:<tag>` | Publish an image so any cluster's kubelet can pull it |
 
 ---
 

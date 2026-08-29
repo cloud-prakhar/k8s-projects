@@ -22,7 +22,9 @@ kubectl get events -n notes-platform --sort-by=.lastTimestamp | tail -20
 | `Pending` | `describe pod` → Events | Unschedulable, or an unbound PVC | See **Storage** below; check node capacity |
 | `Init:0/1` | `logs <pod> -c wait-for-postgres` | The database is not reachable yet | Usually correct — it is waiting. If it never ends, check `POSTGRES_HOST` |
 | `ContainerCreating` (stuck) | `describe pod` → Events | A volume that cannot be attached or mounted | Multi-Attach ⇒ two pods want one RWO volume; wrong `hostPath` type |
-| `ImagePullBackOff` | `describe pod` | The image was not `kind load`ed, or the tag is wrong | `kind load docker-image notes-api:1.0.0 --name kubernetes-lab` |
+| `ImagePullBackOff` | `describe pod` | The tag was never pushed, the repo name is wrong, or the repo is private | `docker push cloudprakhargupta/notes-app:api-1.0.0`; verify with `docker manifest inspect <repo>:<tag>` |
+| Ingress "works" but serves the **wrong** content | `curl -sI http://localhost/ \| grep -i server` | Another web server on the host owns port 80 and answers everything | Confirm with an unknown Host header (the real ingress 404s); reach the controller with `kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80` |
+| `Namespace` stuck `Terminating` | `get ns <ns> -o jsonpath='{.status.conditions}'` | A finalizer nobody will remove — classically a `LoadBalancer` Service's `load-balancer-cleanup` on a cluster with no cloud controller | Remove the finalizer: `kubectl patch svc <svc> -n <ns> -p '{"metadata":{"finalizers":null}}' --type=merge` |
 | `CrashLoopBackOff` | `logs <pod> --previous` | The app exits at start-up, **or** a liveness probe is killing it | Read the logs; check `Exit Code` in `describe` |
 | `CreateContainerConfigError` | `describe pod` | A referenced ConfigMap/Secret **object or key** is missing | Apply the ConfigMap/Secret before the workload |
 | `0/1 Running` | `describe pod` → readiness events | The readiness probe is failing | For `notes-api`, check the database first |

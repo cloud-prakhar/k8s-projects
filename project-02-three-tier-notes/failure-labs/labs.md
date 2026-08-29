@@ -73,8 +73,9 @@ kubectl rollout status deployment/notes-api -n notes-platform
 ```
 
 **What you learned:** `ImagePullBackOff` is a *name resolution* problem for
-images. On Kind, the cause is almost always a missing `kind load`, or
-`imagePullPolicy: Always` making the kubelet ignore the loaded copy.
+images: the kubelet asked a registry for a name and did not get it. The usual
+causes are a tag that was never pushed, a typo in the repository name, or a
+private repository with no `imagePullSecret` on the pod.
 
 ---
 
@@ -740,7 +741,7 @@ kubectl get events -n notes-platform --sort-by=.lastTimestamp | tail -20
 |---|---|
 | `Pending` | `kubectl describe pod` → then `kubectl describe pvc` if it mentions volumes |
 | `Init:0/1` | `kubectl logs <pod> -c <init-container>` |
-| `ImagePullBackOff` | `kubectl describe pod` — then `kind load docker-image` |
+| `ImagePullBackOff` | `kubectl describe pod` — then `docker push` the missing tag |
 | `CrashLoopBackOff` | `kubectl logs <pod> --previous` |
 | `CreateContainerConfigError` | `kubectl describe pod` — it names the missing key |
 | `0/1 Running` | `kubectl describe pod` → readiness probe events |

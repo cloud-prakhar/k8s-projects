@@ -29,12 +29,13 @@ labels:
                               #    Deployment and StatefulSet selectors, and
                               #    every future apply would be rejected.
 
-# Pin image tags here rather than editing the manifest — this is the field an
-# environment overlay or a CI pipeline overrides.
+# Retarget the images here rather than editing the manifest — this is the field
+# an environment overlay or a CI pipeline overrides. `name` matches the image
+# reference IN the manifest; `newName`/`newTag` replace it. Publishing to your
+# own registry (ECR, GHCR, another Docker Hub account) is a change to THIS file
+# only — the manifests never move.
 images:
-  - name: notes-api
-    newTag: "1.0.0"
-  - name: notes-web
-    newTag: "1.0.0"
+  - name: cloudprakhargupta/notes-app
+    newName: cloudprakhargupta/notes-app   # e.g. <acct>.dkr.ecr.<region>.amazonaws.com/notes-app
   - name: postgres
     newTag: "17.5-alpine"

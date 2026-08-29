@@ -57,10 +57,24 @@ The NGINX Ingress Controller is CLUSTER software and was left running — other
 projects use it too. To remove it as well:
   kubectl delete namespace ingress-nginx
 
-Local images are still on your machine and in the cluster; that is intentional
-(rebuilding is slow). To remove them too:
-  docker rmi notes-api:1.0.0 notes-web:1.0.0
+  # ⚠️ That delete HANGS on a cluster with no cloud load balancer (Kind, kubeadm).
+  # The controller's Service is type LoadBalancer and carries the finalizer
+  # service.kubernetes.io/load-balancer-cleanup, which only a cloud controller
+  # manager removes — so nothing ever removes it and the namespace sits in
+  # Terminating forever. Diagnose, then release it by hand:
+  #   kubectl get ns ingress-nginx -o jsonpath='{.status.conditions}'   # "Some resources are remaining: services"
+  #   kubectl patch svc ingress-nginx-controller -n ingress-nginx \\
+  #     -p '{"metadata":{"finalizers":null}}' --type=merge
+  # A finalizer is a promise that something will clean up an external resource.
+  # If the thing that made the promise is not running, you must break it yourself.
+
+Local build artifacts are still on your machine; that is intentional (rebuilding
+is slow). To remove them too:
+  docker rmi cloudprakhargupta/notes-app:api-1.0.0 cloudprakhargupta/notes-app:web-1.0.0
+The images in the registry are left alone — deleting a published tag is a
+registry-side action, not something a cleanup script should do behind your back.
 
 To reset the entire environment:
-  kind delete cluster --name kubernetes-lab
+  kind delete cluster --name kubernetes-lab     # Kind
+  # kubeadm / EKS: the cluster outlives the project — the steps above are the cleanup.
 MSG

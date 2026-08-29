@@ -180,7 +180,7 @@ spec:
     spec:
       containers:
         - name: notes-api
-          image: notes-api:1.0.0
+          image: cloudprakhargupta/notes-app:api-1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -207,8 +207,8 @@ spec:
 | `maxSurge` | `1` | Extra pods allowed above `replicas` during a rollout | `0` with `maxUnavailable: 0` ⇒ the rollout can never start |
 | `maxUnavailable` | `0` | Pods allowed to be missing during a rollout | `1` ⇒ capacity dips during every deploy; a broken image takes real traffic |
 | `revisionHistoryLimit` | `5` | Old ReplicaSets kept for rollback | `0` ⇒ `rollout undo` has nothing to go back to |
-| `image` | `notes-api:1.0.0` | Explicit tag, never `latest` | `:latest` ⇒ rollback is meaningless; two nodes can run different code under one tag |
-| `imagePullPolicy` | `IfNotPresent` | Use the locally loaded image | `Always` ⇒ the kubelet ignores the `kind load`ed copy and fails with `ErrImagePull` |
+| `image` | `cloudprakhargupta/notes-app:api-1.0.0` | Explicit tag, never `latest` | `:latest` ⇒ rollback is meaningless; two nodes can run different code under one tag |
+| `imagePullPolicy` | `IfNotPresent` | Pull once per node, then reuse the cached copy | `Always` ⇒ every pod start hits the registry; a registry outage or an expired pull secret becomes your outage |
 | `containerPort` + `name` | `8080`, `http` | Documents the port and gives it a name Services and probes can reference | Wrong number is *not* an error here — it silently breaks the Service in stage 04 |
 | `env[].valueFrom.fieldRef` | `metadata.name` | Downward API: injects the pod's own name | Nothing at build time can know this; without it you cannot see which pod answered |
 | `resources.requests` | cpu/memory | What the scheduler reserves | Absent ⇒ the scheduler is guessing, and HPA cannot work at all (Project 05) |
@@ -341,7 +341,7 @@ short, and created another. Remember the new IP part; it is about to matter.
 ### A rollout keeps the old ReplicaSet
 
 ```bash
-kubectl set image deployment/notes-web notes-web=notes-web:1.0.0 -n notes-platform --record 2>/dev/null || true
+kubectl set image deployment/notes-web notes-web=cloudprakhargupta/notes-app:web-1.0.0 -n notes-platform --record 2>/dev/null || true
 kubectl rollout history deployment/notes-web -n notes-platform
 kubectl get rs -n notes-platform -l app.kubernetes.io/name=notes-web
 ```

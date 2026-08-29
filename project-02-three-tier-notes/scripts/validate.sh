@@ -88,15 +88,50 @@ fi
 echo "=== 8. The Ingress routes from outside the cluster ==="
 # Host header, not DNS: the ingress controller matches on the Host header, so
 # this works whether or not notes.local is in /etc/hosts.
-if kubectl get ingress notes-ingress -n "${NAMESPACE}" >/dev/null 2>&1; then
-  if curl -fsS -m 10 -H 'Host: notes.local' http://localhost/api/notes >/dev/null 2>&1; then
-    pass "http://notes.local/api/notes via the ingress controller"
-  else
-    fail "ingress did not answer on localhost:80 — is the controller installed, and was the
-     cluster created with clusters/kind-ingress.yaml (extraPortMappings)?"
-  fi
-else
+#
+# HOW the request reaches the controller is the one platform-dependent part:
+# a Kind cluster built from clusters/kind-ingress.yaml maps host port 80 into
+# the node, EKS gives the controller a LoadBalancer, kubeadm gives it a
+# NodePort. So try localhost:80 first, and if that is not our app fall back to
+# `kubectl port-forward`, which works on every cluster there is.
+#
+# WHY this asserts on the BODY and not just a 2xx: port 80 is the most contested
+# port on any developer machine. Apache, nginx, Docker Desktop, or another
+# project's ingress may already own it and answer 200 to anything. A status code
+# alone would then report a pass while your app was never reached at all.
+app_answers() {   # $1 = base URL
+  curl -fsS -m 10 -H 'Host: notes.local' "$1/api/notes" 2>/dev/null | grep -q '"body"'
+}
+
+if ! kubectl get ingress notes-ingress -n "${NAMESPACE}" >/dev/null 2>&1; then
   fail "ingress/notes-ingress missing"
+elif app_answers "http://localhost"; then
+  pass "http://notes.local/api/notes via the ingress controller (host port 80)"
+else
+  # Distinguish "nothing is listening" from "something else is listening",
+  # because the fix is completely different.
+  if curl -s -m 5 -o /dev/null http://localhost/ 2>/dev/null; then
+    other=$(curl -sI -m 5 http://localhost/ 2>/dev/null | grep -i '^server:' | tr -d '\r')
+    echo "  ℹ️  host port 80 is taken by something that is not this app (${other:-unknown server}) —"
+    echo "     ignoring it and going through a port-forward instead"
+  fi
+
+  kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 18080:80 >/dev/null 2>&1 &
+  pf_pid=$!
+  sleep 4
+  if app_answers "http://127.0.0.1:18080"; then
+    pass "http://notes.local/api/notes via the ingress controller (port-forward)"
+    echo "     reach the app the same way on any cluster:"
+    echo "     kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80"
+    echo "     curl -H 'Host: notes.local' http://localhost:8080/api/notes"
+    echo "     in a BROWSER, add '127.0.0.1 notes.local' to /etc/hosts and open"
+    echo "     http://notes.local:8080 — a browser cannot send a custom Host header."
+  else
+    fail "ingress answered on neither localhost:80 nor a port-forward — is the
+     controller running?  kubectl get pods -n ingress-nginx"
+  fi
+  kill "${pf_pid}" 2>/dev/null || true
+  wait "${pf_pid}" 2>/dev/null || true
 fi
 
 echo ""

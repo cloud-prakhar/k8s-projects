@@ -20,20 +20,54 @@ echo "=== Prerequisite — the NGINX Ingress Controller ==="
 # An Ingress object without a controller is inert: it is created successfully,
 # reports no error, and routes nothing. This is CLUSTER-scoped software, not
 # part of the application, which is why it is installed separately.
+#
+# The controller is the ONE piece of this project that differs per platform, and
+# it differs because the platforms genuinely differ in how outside traffic gets
+# in. ingress-nginx ships one manifest per provider; we pick it from the node's
+# providerID rather than asking you which cluster you are on:
+#
+#   kind      → hostPort 80/443 on a node labelled ingress-ready=true
+#   cloud     → a Service type LoadBalancer (EKS provisions an NLB for it)
+#   baremetal → NodePort (kubeadm, or anything with no cloud controller)
+#
+# Everything AFTER this block is identical on all three.
+detect_provider() {
+  local pid
+  pid=$(kubectl get nodes -o jsonpath='{.items[0].spec.providerID}' 2>/dev/null || true)
+  case "${pid}" in
+    kind://*) echo kind ;;
+    aws://*|azure://*|gce://*) echo cloud ;;
+    *)        echo baremetal ;;
+  esac
+}
+INGRESS_PROVIDER="${INGRESS_PROVIDER:-$(detect_provider)}"
+
 if kubectl get ingressclass nginx >/dev/null 2>&1; then
   echo "  ingressclass/nginx already present — skipping install"
+elif [[ "${INSTALL_INGRESS}" != "true" ]]; then
+  echo "  ⚠️  no ingress controller and INSTALL_INGRESS=false — the Ingress will do nothing"
 else
-  if [[ "${INSTALL_INGRESS}" == "true" ]]; then
-    run kubectl apply -f \
-      "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_VERSION}/deploy/static/provider/kind/deploy.yaml"
-    echo "  waiting for the controller to become Ready…"
-    run kubectl wait --namespace ingress-nginx \
-      --for=condition=Ready pod \
-      --selector=app.kubernetes.io/component=controller \
-      --timeout=180s
-  else
-    echo "  ⚠️  no ingress controller and INSTALL_INGRESS=false — the Ingress will do nothing"
+  echo "  provider: ${INGRESS_PROVIDER} (override with INGRESS_PROVIDER=kind|cloud|baremetal)"
+
+  if [[ "${INGRESS_PROVIDER}" == "kind" ]]; then
+    # The kind manifest pins the controller to a node labelled ingress-ready=true.
+    # clusters/kind-ingress.yaml sets that label at creation time; a cluster made
+    # any other way (Docker Desktop's built-in Kubernetes, for one) has not got
+    # it, and the controller pod would sit Pending forever with no node to match.
+    if [[ -z "$(kubectl get nodes -l ingress-ready=true -o name 2>/dev/null)" ]]; then
+      node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+      echo "  no node carries ingress-ready=true — labelling ${node}"
+      run kubectl label node "${node}" ingress-ready=true --overwrite
+    fi
   fi
+
+  run kubectl apply -f \
+    "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_VERSION}/deploy/static/provider/${INGRESS_PROVIDER}/deploy.yaml"
+  echo "  waiting for the controller to become Ready…"
+  run kubectl wait --namespace ingress-nginx \
+    --for=condition=Ready pod \
+    --selector=app.kubernetes.io/component=controller \
+    --timeout=180s
 fi
 
 echo ""
@@ -87,10 +121,18 @@ cat <<MSG
 Deployed. Next:
   ./scripts/validate.sh
 
-  # Add the hostname once, then open it in a browser:
-  echo "127.0.0.1 notes.local" | sudo tee -a /etc/hosts
-  open http://notes.local
+Reaching the app depends on how traffic enters YOUR cluster:
 
-  # No sudo? The Host header is all that matters:
-  curl -H 'Host: notes.local' http://localhost/api/notes
+  # Works everywhere (Kind, kubeadm, EKS) — no DNS, no host ports, no sudo:
+  kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80
+  curl -H 'Host: notes.local' http://localhost:8080/api/notes
+
+  # Kind built from clusters/kind-ingress.yaml (host port 80 mapped into the node):
+  echo "127.0.0.1 notes.local" | sudo tee -a /etc/hosts
+  curl http://notes.local/api/notes
+
+  # EKS — the controller has a real load balancer in front of it:
+  kubectl get svc -n ingress-nginx ingress-nginx-controller \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  # then point notes.local at that name, or send the Host header to it directly.
 MSG
