@@ -1,0 +1,136 @@
+# 11-health-checks/04-shortener-api-deployment.yaml
+# WHAT CHANGED vs 08-statefulsets/04-shortener-api-deployment.yaml:
+#   1. An INIT CONTAINER, `migrate`, owns the database schema. It runs to
+#      completion before the API container starts. The API container is told
+#      RUN_MIGRATIONS=false.
+#   2. Three probes on the API container, each asking a different question.
+#   3. maxUnavailable: 0 — never drop below two serving replicas during a rollout.
+#
+# WHY the init container: migrating inside the serving process meant a pod could
+#   be Running — and, without probes, receiving traffic — while its schema was
+#   still being created or while it was still queued on the migration lock. An
+#   init container makes "schema is current" a precondition of the app starting
+#   at all, and a failed migration shows up as Init:Error instead of as 500s.
+#
+#   Note what it does NOT change: init containers run once PER POD. Two replicas
+#   still means two migrators racing. The advisory lock in migrations.py is what
+#   makes that safe — the init container only moves WHERE the race happens.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener API — schema migrated by an init container, three probes"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "init-container,migrations,readiness,liveness,startup-probe"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-api
+      app.kubernetes.io/instance: shortener-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-api
+        app.kubernetes.io/instance: shortener-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      initContainers:
+        - name: migrate
+          # The SAME image as the app: the migrations ship with the code that
+          # needs them, so a rollout can never run new code against an old schema.
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "migrate.py"]
+          envFrom:
+            - configMapRef:
+                name: shortener-config-v2
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+      containers:
+        - name: shortener-api
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shortener-config-v2
+          env:
+            # `env` wins over `envFrom` for the same key — a per-container override.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # STARTUP: until it passes, readiness and liveness are not run at all.
+          # 30 × 1s to import Flask and bind the port.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+          # READINESS: PostgreSQL reachable → in the Service AND (via the ALB
+          # readiness gate) registered healthy in the target group. Redis is NOT
+          # checked — the API works without it (see app.py healthz()).
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # LIVENESS: the process only. Never a dependency — a database blip must
+          # not restart every API pod at once.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

@@ -1,0 +1,50 @@
+# 05-configmaps/02-redis-config.yaml
+# WHY: Redis is configured with a FILE, not environment variables. Squeezing
+#      a dozen settings into command-line flags is unreadable and untestable. A
+#      ConfigMap key can hold a whole file, which the pod mounts where Redis
+#      expects it.
+#
+#      Unlike env vars, a mounted file is a live view of the ConfigMap — EXCEPT
+#      when mounted with subPath, as here. So changing this object restarts
+#      nothing and updates nothing. The `checksum/config` annotation on the
+#      Redis pod template is how a change to THIS object becomes a rollout.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis-config
+    app.kubernetes.io/instance: redis-config
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "redis.conf for the shortener's cache, mounted as a file"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap-as-file,subpath,checksum-annotation"
+data:
+  redis.conf: |
+    # --- network ---------------------------------------------------------------
+    # Listen on the pod IP. Redis's own default is loopback only, which would make
+    # it unreachable through any Service — silently.
+    bind 0.0.0.0
+    port 6379
+    # Protected mode refuses remote clients when no password is set. Stage 06
+    # adds a password; until then it must be off for the API to connect at all.
+    protected-mode no
+
+    # --- persistence -------------------------------------------------------------
+    # Append every write to a log, fsync once a second. On restart Redis replays
+    # the log — counters survive, IF /data outlives the container (stage 07).
+    dir /data
+    appendonly yes
+    appendfsync everysec
+
+    # --- memory ------------------------------------------------------------------
+    # Keep this BELOW the container's memory limit (256Mi), or the kernel kills
+    # Redis (OOMKilled) before Redis ever gets the chance to evict anything.
+    maxmemory 100mb
+    # Evict only keys that have a TTL — the cached links. Click counters have no
+    # TTL, so they are never evicted. `allkeys-lru` would silently delete them.
+    maxmemory-policy volatile-lru

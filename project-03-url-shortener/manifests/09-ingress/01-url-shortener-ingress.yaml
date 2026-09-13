@@ -1,0 +1,82 @@
+# 09-ingress/01-url-shortener-ingress.yaml
+# WHY: A URL shortener whose links only work through `kubectl port-forward` on
+#      one engineer's laptop is not a URL shortener. Short links must be
+#      clickable by anyone, at one address, with `/`, `/api` and `/r` going to
+#      different backends — routing by URL PATH, which no Service can do.
+#
+#      An Ingress is a set of HTTP routing rules. On EKS the AWS Load Balancer
+#      Controller watches Ingresses with `ingressClassName: alb` and turns each
+#      one into a real Application Load Balancer: listeners, rules, target
+#      groups, security groups — all created in your AWS account.
+#
+# 💰 An ALB costs ~$0.0225/hour plus usage from the moment this is applied, until
+#    this object is DELETED. Deleting the namespace deletes it too — but deleting
+#    the CONTROLLER first leaves the ALB orphaned and billing. See cleanup.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: url-shortener-ingress
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: url-shortener-ingress
+    app.kubernetes.io/instance: url-shortener-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Internet-facing ALB: / to the UI, /api and /r to the API"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingress,alb,path-routing,target-type-ip"
+    # --- AWS Load Balancer Controller settings (its own annotation vocabulary) ---
+    # internet-facing: public subnets, a public DNS name. `internal` = VPC only.
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # ip: register POD IPs as targets. The VPC CNI gives pods real VPC addresses,
+    # so the ALB sends traffic straight to pods — no NodePort, no extra kube-proxy
+    # hop. (`instance` would target every node's NodePort instead.)
+    alb.ingress.kubernetes.io/target-type: ip
+    # The ALB runs its OWN health checks against every pod, independently of the
+    # kubelet's probes. Both API and web answer /healthz.
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    # How long the ALB keeps sending in-flight requests to a pod it is removing.
+    # The AWS default is 300s, which makes every rollout and every cleanup slow.
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=20
+    # ⚠️ WHO MAY CONNECT. A public URL shortener is an open redirector — exactly
+    # what phishing campaigns look for. The manual steps and deploy.sh replace
+    # this with YOUR public IP (/32) before the lab goes further.
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    # Tag the AWS resources so an orphan is findable in the console.
+    alb.ingress.kubernetes.io/tags: project=url-shortener,managed-by=aws-load-balancer-controller
+spec:
+  # Which controller implements this Ingress. The Helm chart creates
+  # IngressClass/alb. Omit it (with no default class) and the Ingress is accepted,
+  # reports nothing, and no load balancer ever appears.
+  ingressClassName: alb
+  rules:
+    # No `host:` — the rule matches ANY Host header. We do not own a DNS name to
+    # point at the ALB; its generated hostname is the address. Project 10 adds
+    # Route53, ExternalDNS and an ACM certificate for a real host with HTTPS.
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix           # /api, /api/links, /api/info …
+            backend:
+              service:
+                name: shortener-api
+                port:
+                  number: 8080
+          - path: /r
+            pathType: Prefix           # every short link: /r/<code>
+            backend:
+              service:
+                name: shortener-api
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shortener-web
+                port:
+                  number: 80

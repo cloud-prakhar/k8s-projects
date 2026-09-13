@@ -22,7 +22,7 @@ Which project teaches which resource, and at what depth.
 | Deployment | 🟩 | 🟨 | 🟨 | 🟩 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
 | StatefulSet | — | 🟩 | 🟩 | 🟨 | — | — | — | 🟨 | 🟨 | 🟨 |
 | DaemonSet | — | — | — | — | — | — | — | 🟩 | 🟨 | 🟨 |
-| Job | — | — | 🟨 | — | — | 🟩 | — | — | — | 🟨 |
+| Job | — | — | 🔵 | — | — | 🟩 | — | — | — | 🟨 |
 | CronJob | — | — | — | — | — | 🟩 | — | 🟨 | — | 🟨 |
 | Static pod / `nodeName` | — | — | — | — | — | — | — | — | 🔵 | — |
 
@@ -31,12 +31,12 @@ Which project teaches which resource, and at what depth.
 | Resource | P01 | P02 | P03 | P04 | P05 | P06 | P07 | P08 | P09 | P10 |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | ClusterIP Service | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
-| NodePort Service | — | 🟩 | 🟨 | — | 🟨 | — | — | 🟨 | — | 🟨 |
-| LoadBalancer Service | 🔵 | 🟩¹ | — | 🟨 | 🟨 | — | — | — | — | 🟩 |
+| NodePort Service | — | 🟩 | — | — | 🟨 | — | — | 🟨 | — | 🟨 |
+| LoadBalancer Service | 🔵 | 🟩¹ | 🔵 | 🟨 | 🟨 | — | — | — | — | 🟩 |
 | Headless Service | — | 🟩 | 🟩 | 🟨 | — | — | — | 🟨 | 🟨 | 🟨 |
 | ExternalName Service | — | — | 🟩 | 🟨 | — | — | — | — | — | 🟨 |
-| Ingress | — | 🟩 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 |
-| Ingress Controller | — | 🟩 | 🟨 | 🟨 | 🟨 | — | — | 🟨 | — | 🟩² |
+| Ingress | — | 🟩 | 🟩² | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 |
+| Ingress Controller | — | 🟩 | 🟩² | 🟨 | 🟨 | — | — | 🟨 | — | 🟩² |
 | IngressClass | — | 🟩 | 🟨 | 🟨 | — | — | — | — | — | 🟨 |
 | EndpointSlice | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | — | — | 🟨 | 🟨 | — |
 | CoreDNS / service discovery | 🟩 | 🟨 | 🟩 | 🟩 | — | 🟨 | — | 🟨 | — | 🟨 |
@@ -58,7 +58,7 @@ Which project teaches which resource, and at what depth.
 | Secret (env / volume) | 🟩 | 🟨 | 🟨 | 🟨 | — | 🟨 | 🟩 | 🟨 | — | 🟨 |
 | imagePullSecrets | — | — | — | — | — | — | 🟩 | — | — | 🟨 |
 | TLS Secret | — | — | — | 🟨 | — | — | 🟨 | — | — | 🟩 |
-| External secret managers | 🔵 | 🔵 | — | — | — | — | 🔵 | — | — | 🟩 |
+| External secret managers | 🔵 | 🔵 | 🔵 | — | — | — | 🔵 | — | — | 🟩 |
 | `checksum/config` rollout trigger | — | — | 🟩 | 🟨 | 🟨 | — | — | 🟨 | — | 🟨 |
 
 ## Storage
@@ -69,8 +69,8 @@ Which project teaches which resource, and at what depth.
 | hostPath (demo only) | — | 🟩 | — | — | — | — | ⚠️🔵 | 🟨 | — | — |
 | PersistentVolume | — | 🟩 | 🟨 | 🟨 | — | 🟨 | — | 🟨 | — | 🟨 |
 | PersistentVolumeClaim | — | 🟩 | 🟩 | 🟨 | — | 🟩 | — | 🟨 | — | 🟩 |
-| StorageClass | — | 🟩 | 🟨 | — | — | — | — | 🟨 | — | 🟩³ |
-| Dynamic provisioning | — | 🟩 | 🟨 | 🟨 | — | 🟨 | — | 🟨 | — | 🟩 |
+| StorageClass | — | 🟩 | 🟩³ | — | — | — | — | 🟨 | — | 🟩³ |
+| Dynamic provisioning | — | 🟩 | 🟩³ | 🟨 | — | 🟨 | — | 🟨 | — | 🟩 |
 | Access modes | — | 🟩 | 🟨 | — | — | 🟩 | — | — | — | 🟨 |
 | Reclaim policy | — | 🟩 | 🟨 | — | — | — | — | — | — | 🟨 |
 | `volumeClaimTemplates` | — | 🟩 | 🟩 | — | — | — | — | 🟨 | 🟨 | 🟨 |
@@ -104,9 +104,9 @@ Which project teaches which resource, and at what depth.
 | Liveness probe | 🟩 | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
 | Startup probe | 🟩 | 🟨 | 🟨 | — | 🟩 | — | — | 🟨 | — | 🟨 |
 | Rolling update strategy | 🟩 | 🟨 | 🟨 | 🟨 | 🟩 | — | — | 🟨 | 🟨 | 🟨 |
-| Rollback | 🟩 | 🟨 | — | 🟨 | 🟩 | — | — | — | — | 🟩 |
-| PodDisruptionBudget | — | 🔵 | — | — | 🟩 | — | — | — | 🟩 | 🟨 |
-| Graceful termination / preStop | — | 🔵 | 🟨 | — | 🟩 | 🟨 | — | — | 🟨 | 🟨 |
+| Rollback | 🟩 | 🟨 | 🟨 | 🟨 | 🟩 | — | — | — | — | 🟩 |
+| PodDisruptionBudget | — | 🔵 | 🔵 | — | 🟩 | — | — | — | 🟩 | 🟨 |
+| Graceful termination / preStop | — | 🔵 | 🔵 | — | 🟩 | 🟨 | — | — | 🟨 | 🟨 |
 | Canary / blue-green | — | — | — | 🔵 | 🟩 | — | — | — | — | 🟩 |
 
 ## Scheduling
@@ -120,7 +120,7 @@ Which project teaches which resource, and at what depth.
 | Taints & tolerations | — | — | — | — | — | — | — | 🟩⁴ | 🟩 | 🟨 |
 | Topology spread constraints | — | — | — | — | — | — | — | — | 🟩 | 🟩 |
 | PriorityClass / preemption | — | — | — | — | — | 🟨 | — | — | 🟩 | 🟨 |
-| Cordon / drain / eviction | — | — | — | — | 🟩 | — | — | — | 🟩 | 🟨 |
+| Cordon / drain / eviction | — | — | 🟨 | — | 🟩 | — | — | — | 🟩 | 🟨 |
 
 ⁴ node-exporter DaemonSet tolerating control-plane taints.
 
@@ -138,18 +138,19 @@ Which project teaches which resource, and at what depth.
 | Linux capabilities / seccomp | — | — | — | — | — | — | 🟩 | 🔵 | — | 🟨 |
 | Pod Security Standards | — | — | — | — | — | — | 🟩 | 🟨 | — | 🟨 |
 | Image scanning / trusted images | 🔵 | — | — | 🔵 | — | — | 🟩 | — | — | 🔵 |
-| IRSA / workload identity | — | — | — | — | — | — | 🔵 | — | — | 🟩 |
+| IRSA / workload identity | — | — | 🟨⁷ | — | — | — | 🔵 | — | — | 🟩 |
 
 ⁵ ServiceAccount annotated for IRSA / EKS Pod Identity.
+⁷ EKS Pod Identity grants the EBS CSI driver and the AWS Load Balancer Controller their IAM roles (set up by `clusters/eks-lab.yaml`).
 
 ## Advanced Pod Configuration
 
 | Resource | P01 | P02 | P03 | P04 | P05 | P06 | P07 | P08 | P09 | P10 |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Init containers | — | 🟩 | 🟩 | 🟨 | — | 🟩 | 🟨 | 🟨 | — | 🟨 |
-| Sidecar containers | — | — | 🟨 | — | — | 🟩 | 🟨 | 🟩 | — | 🟨 |
-| Lifecycle hooks (postStart/preStop) | — | — | — | — | 🟩 | 🟩 | — | — | 🟨 | 🟨 |
-| Downward API | 🟩 | 🟨 | — | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | — | — |
+| Sidecar containers | — | — | — | — | — | 🟩 | 🟨 | 🟩 | — | 🟨 |
+| Lifecycle hooks (postStart/preStop) | — | — | 🔵 | — | 🟩 | 🟩 | — | — | 🟨 | 🟨 |
+| Downward API | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | — | — |
 | Ephemeral debug containers | — | — | — | 🟨 | — | — | — | 🟩 | — | — |
 
 ## Delivery & Observability
@@ -158,7 +159,7 @@ Which project teaches which resource, and at what depth.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Labels / selectors / annotations | 🟩 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 |
 | Kustomize | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 |
-| Helm | — | — | — | — | — | — | — | 🟨⁶ | — | 🟩 |
+| Helm | — | — | 🟨⁶ | — | — | — | — | 🟨⁶ | — | 🟩 |
 | GitOps / reconcile loop | — | — | — | — | — | — | — | — | — | 🟩 |
 | `logs` / `describe` / `events` | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | 🟩 | 🟨 | 🟨 |
 | `kubectl top` | — | — | — | — | 🟩 | — | — | 🟩 | 🟨 | 🟨 |

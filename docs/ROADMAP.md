@@ -7,7 +7,7 @@ reason to exist, chosen so that the Kubernetes resource it teaches is *genuinely
 |---|---|---|---|---|
 | 01 | [`project-01-task-tracker-webapp`](../project-01-task-tracker-webapp/) ✅ | 🟢 Beginner | single-node | 3–4 h |
 | 02 | [`project-02-three-tier-notes`](../project-02-three-tier-notes/) ✅ | 🟢 Beginner+ | ingress | 4–5 h |
-| 03 | `project-03-url-shortener` | 🟡 Intermediate | ingress | 4–5 h |
+| 03 | [`project-03-url-shortener`](../project-03-url-shortener/) ✅ | 🟡 Intermediate | **AWS EKS** | 4–5 h + ~$1–2 |
 | 04 | `project-04-ecommerce-microservices` | 🟡 Intermediate | ingress | 5–6 h |
 | 05 | `project-05-production-web-platform` | 🟡 Intermediate+ | multi-node | 5–6 h |
 | 06 | `project-06-batch-processing-platform` | 🟡 Intermediate+ | ingress | 4–5 h |
@@ -79,26 +79,38 @@ and a StatefulSet deleted while its PVC survives.
 
 ## Project 03 — URL Shortener
 
-**Application:** `short.local/abc123` → `https://long.url/...`. Web UI + API + **Redis** (hot cache + counter) +
-**PostgreSQL** (durable mappings). Optionally an ExternalName Service pointing at an out-of-cluster URL.
+> ✅ **Built** — [`project-03-url-shortener/`](../project-03-url-shortener/). **Runs on AWS EKS**
+> ([`clusters/eks-lab.yaml`](../clusters/eks-lab.yaml)), not Kind: zonal EBS, a real ALB, VPC pod IPs and a cluster
+> with no default StorageClass are the lessons.
 
-**The narrative:** Two backing stores with genuinely different needs. Redis as a StatefulSet with a headless Service
-teaches per-pod DNS (`redis-0.redis.ns.svc.cluster.local`). We resolve names from inside a pod to see CoreDNS work.
-Config that must never silently change mid-rollout introduces **immutable ConfigMaps**. An external analytics endpoint
-introduces **ExternalName**.
+**Application:** Web UI + API + **Redis primary/replica** (link cache + click counters) + **PostgreSQL** (durable
+links), plus an analytics collector in **another team's namespace** reached through an **ExternalName** Service.
+
+**The narrative:** Everything is configured by hostname from stage 03 → `NXDOMAIN`, because Deployments register
+nothing in DNS → Services, the search list and `ndots`, and an ExternalName alias. A live edit to a mutable ConfigMap
+makes one link alternate `404 302 404` across replicas → **immutable, versioned ConfigMaps** and `checksum/config`.
+Passwords move to Secrets (and off Redis's command line). A pod replacement deletes every link → gp3 EBS via the EBS
+CSI driver, on a cluster whose `gp2` class is not default. Scaling Redis to two puts both on one volume and they
+diverge → StatefulSet, headless Service, and **exactly half of all writes failing with `READONLY`** until writes use
+`redis-0`'s **per-pod DNS name**. Port-forward is not a front door → Ingress → **ALB** via the AWS Load Balancer
+Controller, locked to your IP. Traffic arrives before pods are ready and migrations are tied to app start-up →
+probes, a migration **init container** with an advisory lock, and **ALB pod readiness gates**. Finally a Kustomize
+`configMapGenerator` replaces hand-versioned config.
 
 **Concepts covered**
 
 | Category | Items |
 |---|---|
-| Networking | Headless Service, per-pod DNS, CoreDNS internals, FQDN forms, ExternalName, service discovery patterns |
-| Workloads | StatefulSet (Redis), Deployment (API/UI), init container running DB migrations |
-| Config | Immutable ConfigMap, config-as-volume with subPath, checksum annotation to force rollout |
-| Storage | `volumeClaimTemplates`, per-replica PVCs, what happens to PVCs when a StatefulSet is deleted |
-| Ops | `kubectl exec` + `nslookup`/`dig`, `kubectl get endpointslices` |
+| Networking | ClusterIP as a DNS record, search list and `ndots:5`, FQDN forms, cross-namespace names, **ExternalName**, **headless Service + per-pod DNS**, read/write split by name |
+| Workloads | StatefulSet (Redis primary+replica, PostgreSQL), ordinal-derived roles, init container running migrations |
+| Config | Mutable vs **immutable** ConfigMaps, versioned names, `checksum/config`, subPath, **configMapGenerator** |
+| Storage (EKS) | EBS CSI driver, gp3 StorageClass, no default class, `WaitForFirstConsumer`, AZ pinning, RWO is per node, `volumeClaimTemplates`, PVC retention |
+| Ingress (EKS) | AWS Load Balancer Controller, `target-type: ip`, `inbound-cidrs`, ALB 404/502/503, readiness gates, finalizers and orphaned ALBs |
+| Ops | Resolving names with the app's resolver, `aws elbv2 describe-target-health`, cleanup order, orphan checks |
 
-**Failure labs:** DNS failure (wrong FQDN, wrong namespace), Redis pod rescheduled without its PVC, cache/DB
-inconsistency after a rollout, headless Service used where ClusterIP was needed.
+**Failure labs:** twelve, including wrong-namespace FQDN, config drift, writes to a replica, a non-headless governing
+Service, a class-less PVC, a volume node-affinity conflict, ALB 502 vs 503, a stuck migration init container, an
+ExternalName pointing nowhere, cache/DB inconsistency, and how an ALB gets orphaned.
 
 ---
 
@@ -285,7 +297,7 @@ reverting a manual `kubectl edit`.
 flowchart TD
     P1["01 Task Tracker<br/>workloads · services · config"]
     P2["02 Three-Tier Notes<br/>storage · statefulset · ingress"]
-    P3["03 URL Shortener<br/>DNS · headless · multi-datastore"]
+    P3["03 URL Shortener (EKS)<br/>DNS · headless · multi-datastore"]
     P4["04 E-Commerce<br/>microservices · routing · netpol"]
     P5["05 Production Platform<br/>resources · HPA · PDB · rollouts"]
     P6["06 Batch Platform<br/>jobs · cronjobs · init · sidecars"]

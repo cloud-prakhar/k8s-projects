@@ -1,0 +1,75 @@
+# clusters/eks-lab.yaml
+# WHY: Project 03 runs on AWS EKS. A real cloud cluster is where the things this
+#      project teaches actually behave the way they do in production: EBS volumes
+#      that live in ONE availability zone, an Application Load Balancer created
+#      from an Ingress, pod IPs that are real VPC addresses, and CoreDNS running as
+#      a managed add-on.
+#
+# ⚠️ THIS COSTS MONEY WHILE IT EXISTS — roughly $0.20/hour for this config
+#    (control plane ~$0.10 + 2 × t3.medium ~$0.08 + EBS), plus ~$0.02/hour for the
+#    ALB once stage 09 creates one. Delete it when you stop for the day:
+#      eksctl delete cluster --config-file clusters/eks-lab.yaml --disable-nodegroup-eviction
+#    …and read the project's cleanup section FIRST — objects Kubernetes created in
+#    AWS (load balancers, EBS volumes) must be deleted through Kubernetes before
+#    the cluster goes, or they are orphaned and keep billing.
+#
+# Create (15–20 minutes):
+#   eksctl create cluster --config-file clusters/eks-lab.yaml
+# Preview what eksctl will do without creating anything:
+#   eksctl create cluster --config-file clusters/eks-lab.yaml --dry-run
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: kubernetes-lab
+  region: us-east-1          # change freely; every command in the projects reads it from here
+  version: "1.36"
+  tags:
+    project: kubernetes-project-lab   # lets you find everything this lab created in the AWS console
+
+vpc:
+  # eksctl builds a new VPC with public and private subnets in several AZs, and
+  # tags the public ones `kubernetes.io/role/elb=1` — the tag the AWS Load
+  # Balancer Controller searches for when it places an internet-facing ALB.
+  nat:
+    # 🧪 LAB SAVING: no NAT gateway (~$0.045/hour + data, the classic surprise on
+    # the bill). Nodes go in PUBLIC subnets instead so they can pull images.
+    # 🏭 Production: private node subnets behind NAT (or VPC endpoints).
+    gateway: Disable
+
+iam:
+  # EKS Pod Identity: a Kubernetes ServiceAccount is mapped to an IAM role by the
+  # EKS API itself — no OIDC provider, no role-trust-policy editing. The pod gets
+  # temporary AWS credentials from the eks-pod-identity-agent on its node.
+  podIdentityAssociations:
+    - namespace: kube-system
+      serviceAccountName: aws-load-balancer-controller
+      createServiceAccount: true
+      # eksctl knows the IAM policy this controller needs (create/modify ALBs,
+      # target groups, security groups). Installed by the project's deploy step.
+      wellKnownPolicies:
+        awsLoadBalancerController: true
+
+addons:
+  - name: vpc-cni             # pod IPs are real VPC IPs — ALB targets pods directly
+  - name: coredns             # cluster DNS; Project 03 takes it apart
+  - name: kube-proxy
+  - name: eks-pod-identity-agent
+  - name: aws-ebs-csi-driver  # without it, no PersistentVolumeClaim can ever bind
+    # Create the IAM role the driver needs and associate it with the driver's
+    # ServiceAccount through Pod Identity, in one step.
+    useDefaultPodIdentityAssociations: true
+
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.medium   # 2 vCPU / 4 GiB; the VPC CNI allows 17 pods per t3.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 3
+    volumeSize: 20
+    volumeType: gp3
+    privateNetworking: false  # public subnets, because there is no NAT (see above)
+    # eksctl spreads the nodes across the VPC's availability zones. That spread
+    # is what makes the "EBS volume is stuck in the other AZ" lab possible.
+    labels:
+      lab.k8s-project/pool: general

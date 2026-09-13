@@ -1,0 +1,49 @@
+# 05-configmaps/06-shortener-config-v1.yaml
+# WHY: Editing the mutable `shortener-config` in place gave us a fleet where
+#      one API pod generated 10-character codes and rejected 6-character ones,
+#      and the other did the opposite — the same link worked or 404'd depending
+#      on which pod answered. The ConfigMap had changed; the pods had not; and
+#      any restart silently moved a pod to the new value.
+#
+#      The fix is two rules together:
+#        1. `immutable: true` — this object can never be edited. The API server
+#           rejects any change to `data`. Nobody can drift a running fleet.
+#        2. A VERSIONED NAME — a change is a NEW object (`…-v2`), and the
+#           Deployment is edited to reference it. Editing the pod template is a
+#           rollout, so every pod moves to the new config together, with
+#           `rollout status`, readiness gating, and `rollout undo` — which now
+#           restores the OLD config too, because v1 still exists.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortener-config-v1
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-config
+    app.kubernetes.io/instance: shortener-config-v1
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener configuration, version 1 — immutable"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "immutable-configmap,versioned-config,rollout-on-change"
+# Top-level field, not under metadata or data. Once true it can never be set back
+# to false — the only way out is to delete the object.
+immutable: true
+data:
+  CONFIG_VERSION: "v1"
+  APP_ENV: "lab"
+  LOG_LEVEL: "info"
+  POSTGRES_HOST: "postgres.url-shortener.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "shortener"
+  POSTGRES_USER: "shortener"
+  REDIS_WRITE_HOST: "redis.url-shortener.svc.cluster.local"
+  REDIS_READ_HOST: "redis.url-shortener.svc.cluster.local"
+  REDIS_PORT: "6379"
+  CODE_LENGTH: "6"
+  CACHE_TTL_SECONDS: "300"
+  PUBLIC_BASE_URL: ""
+  ANALYTICS_URL: "http://analytics.url-shortener.svc.cluster.local/events"
+  SHORTENER_API_URL: "http://shortener-api.url-shortener.svc.cluster.local:8080"

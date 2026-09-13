@@ -1,0 +1,146 @@
+# 11-health-checks/03-redis-statefulset.yaml
+# WHAT CHANGED vs 08-statefulsets/02-redis-statefulset.yaml:
+#   Probes. Without a readiness probe a pod is "Ready" the instant its container
+#   starts — so `OrderedReady` started redis-1 before redis-0 was accepting
+#   connections, and the ClusterIP Service sent reads to a Redis still loading
+#   its append-only file. `redis-cli ping` answers PONG only once Redis is serving.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis primary + replica — exec-probed with redis-cli ping"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "exec-probe,orderedready-needs-readiness"
+spec:
+  serviceName: redis-headless
+  replicas: 2
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+      annotations:
+        checksum/config: "70c9fca75d98218f7c9fd9d482705a571dd8228a4976695c95447a85503d5369"
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: redis
+                    app.kubernetes.io/instance: redis
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /usr/local/etc/redis/redis.conf /run/redis/redis.conf
+              printf 'requirepass %s\nmasterauth %s\n' "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> /run/redis/redis.conf
+              ORDINAL="${HOSTNAME##*-}"
+              if [ "$ORDINAL" = "0" ]; then
+                echo "ordinal 0 → primary"
+              else
+                PRIMARY="redis-0.${HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local"
+                echo "ordinal ${ORDINAL} → replica of ${PRIMARY}"
+                printf 'replicaof %s 6379\n' "$PRIMARY" >> /run/redis/redis.conf
+              fi
+              exec redis-server /run/redis/redis.conf
+          env:
+            - name: HEADLESS_SERVICE
+              value: redis-headless
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH          # lets the probes authenticate
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          # STARTUP: loading a large append-only file takes time. Two minutes.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: runtime-config
+              mountPath: /run/redis
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: runtime-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        storageClassName: url-shortener-gp3
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,63 @@
+# 06-secrets/05-shortener-api-deployment.yaml
+# WHAT CHANGED vs 05-configmaps/07-shortener-api-deployment-v1.yaml:
+#   No literal credentials remain. The API receives both passwords through
+#   secretKeyRef — and nothing else from either Secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener API — config v1 plus credentials from two Secrets"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secretkeyref"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-api
+      app.kubernetes.io/instance: shortener-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-api
+        app.kubernetes.io/instance: shortener-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-api
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shortener-config-v1
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

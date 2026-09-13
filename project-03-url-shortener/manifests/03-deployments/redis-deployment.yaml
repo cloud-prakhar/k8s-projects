@@ -1,0 +1,52 @@
+# 03-deployments/redis-deployment.yaml
+# WHY: Redis is the fast path — a cache of code → URL in front of PostgreSQL,
+#      and the click counters. It has a completely different job from the
+#      database: losing it degrades the product (slower, uncounted redirects)
+#      but does not break it. That difference drives every later decision about
+#      how each store is run.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis — link cache and click counters (single instance, no storage yet)"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,cache"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+    spec:
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          # `redis-server` as the FIRST argument matters: the image's entrypoint
+          # only drops from root to the `redis` user (UID 999) when it sees it.
+          # --appendonly yes logs every write to disk, so counters could survive
+          # a restart — if there were a disk worth writing to. There is not yet.
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

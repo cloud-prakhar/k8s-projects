@@ -1,0 +1,41 @@
+# 04-services/analytics-externalname-service.yaml
+# WHY: The API is configured with `http://analytics/events`. That service lives
+#      in another team's namespace today, and may be a SaaS endpoint or a managed
+#      AWS service tomorrow. Hardcoding its real address into our config couples
+#      every rollout of ours to every move of theirs.
+#
+#      An ExternalName Service is a DNS ALIAS owned by this namespace:
+#
+#          analytics.url-shortener.svc.cluster.local
+#              CNAME → analytics-collector.analytics.svc.cluster.local
+#
+#      Re-point `externalName` and every client follows on its next DNS lookup —
+#      no config change, no rollout.
+#
+# ⚠️ What it is NOT: a proxy. No ClusterIP, no kube-proxy rules, no port mapping,
+#    no EndpointSlice, no Host-header rewriting. The client connects straight to
+#    whatever the CNAME finally resolves to, on the port the client chose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/instance: analytics
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "DNS alias for the analytics team's collector (ExternalName → CNAME)"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "externalname,cname,service-indirection"
+spec:
+  type: ExternalName
+  # Any DNS name. Another namespace's Service today; on EKS it is just as often
+  # an RDS endpoint (`mydb.abc123.us-east-1.rds.amazonaws.com`) or a SaaS host.
+  # Never an IP address — it must be a name CoreDNS can return as a CNAME.
+  externalName: analytics-collector.analytics.svc.cluster.local
+  # No selector: nothing here selects pods.
+  # No ports: they would be accepted and ignored. The client's URL decides the
+  # port (80 here), and it must be a port the TARGET actually listens on.

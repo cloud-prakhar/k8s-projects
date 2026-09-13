@@ -1,0 +1,97 @@
+# 07-storage/05-redis-deployment.yaml
+# WHAT CHANGED vs 06-secrets/04-redis-deployment.yaml:
+#   1. /data — where redis.conf says the append-only file lives — is on
+#      PVC/redis-data.
+#   2. strategy: Recreate, for the same Multi-Attach reason as PostgreSQL.
+#   3. fsGroup (already set) now earns its keep: a new EBS filesystem is owned
+#      by root. fsGroup makes the kubelet chown the volume to GID 1000 on mount,
+#      so Redis — running as UID 999, GID 1000 — can write to it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis — append-only file on an EBS-backed PVC"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "pvc-mount,fsgroup,recreate-strategy"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+      annotations:
+        checksum/config: "70c9fca75d98218f7c9fd9d482705a571dd8228a4976695c95447a85503d5369"
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /usr/local/etc/redis/redis.conf /run/redis/redis.conf
+              printf 'requirepass %s\nmasterauth %s\n' "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> /run/redis/redis.conf
+              exec redis-server /run/redis/redis.conf
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: runtime-config
+              mountPath: /run/redis
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: runtime-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: data
+          persistentVolumeClaim:
+            claimName: redis-data

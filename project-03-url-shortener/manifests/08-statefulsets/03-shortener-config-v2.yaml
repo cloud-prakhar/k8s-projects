@@ -1,0 +1,47 @@
+# 08-statefulsets/03-shortener-config-v2.yaml
+# WHY: With a primary and a replica behind the ClusterIP Service `redis`, every
+#      NEW connection is load-balanced to either pod. Roughly half of all writes
+#      reached the replica and failed:
+#
+#          READONLY You can't write against a read only replica.
+#
+#      Writes must go to ONE SPECIFIC member, by a name that is always that
+#      member. Reads can still go anywhere. So the two host settings split:
+#
+#          REDIS_WRITE_HOST → redis-0.redis-headless…   (per-pod DNS: the primary)
+#          REDIS_READ_HOST  → redis…                     (ClusterIP: any member)
+#
+#      v1 is immutable, so this is a NEW object. Pointing the API at it is a
+#      rollout; `kubectl rollout undo` puts the API back on v1.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortener-config-v2
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-config
+    app.kubernetes.io/instance: shortener-config-v2
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener configuration, version 2 — writes to the Redis primary by per-pod DNS"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "immutable-configmap,per-pod-dns,read-write-split"
+immutable: true
+data:
+  CONFIG_VERSION: "v2"
+  APP_ENV: "lab"
+  LOG_LEVEL: "info"
+  POSTGRES_HOST: "postgres.url-shortener.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "shortener"
+  POSTGRES_USER: "shortener"
+  REDIS_WRITE_HOST: "redis-0.redis-headless.url-shortener.svc.cluster.local"   # ← changed
+  REDIS_READ_HOST: "redis.url-shortener.svc.cluster.local"
+  REDIS_PORT: "6379"
+  CODE_LENGTH: "6"
+  CACHE_TTL_SECONDS: "300"
+  PUBLIC_BASE_URL: ""
+  ANALYTICS_URL: "http://analytics.url-shortener.svc.cluster.local/events"
+  SHORTENER_API_URL: "http://shortener-api.url-shortener.svc.cluster.local:8080"

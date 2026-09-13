@@ -1,0 +1,89 @@
+# 11-health-checks/05-shortener-web-deployment.yaml
+# WHAT CHANGED vs 05-configmaps/08-shortener-web-deployment-v1.yaml:
+#   1. Probes. The web tier has no datastore, so readiness is deliberately
+#      shallow: it must NOT call the API, or one slow API would pull the whole
+#      UI out of the ALB — a cascading readiness failure.
+#   2. References shortener-config-v2, so v1 has no consumers left.
+#   3. maxUnavailable: 0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener UI — probed, config v2"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "readiness,liveness,shallow-readiness"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-web
+      app.kubernetes.io/instance: shortener-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-web
+        app.kubernetes.io/instance: shortener-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-web
+          image: cloudprakhargupta/url-shortener:web-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SHORTENER_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v2
+                  key: SHORTENER_API_URL
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v2
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"

@@ -11,7 +11,8 @@ This page is the repository's honest reference for what is **real** and what is 
 
 | Projects | Target | Rationale |
 |---|---|---|
-| 01–09 | **Kind** (Minikube documented as an alternative) | Free, fast, disposable, reproducible, no account needed |
+| 01–02, 04–09 | **Kind** (Minikube documented as an alternative) | Free, fast, disposable, reproducible, no account needed |
+| 03 | **AWS EKS** (`clusters/eks-lab.yaml`) | Zonal EBS, no default StorageClass, ALB target health and VPC pod IPs are the lessons — they cannot be simulated truthfully |
 | 10 | **AWS EKS** | Cloud-only behaviour (ALB, EBS CSI, IRSA, ACM, Route53) cannot be simulated truthfully |
 | AKS / GKE | Concept call-outs inside projects | Equivalent concepts, different names; documented, not maintained as a third path |
 
@@ -24,7 +25,8 @@ Cloud sections are always **optional**, always cost-annotated, and always end wi
 | Config | Nodes | Used by | Notes |
 |---|---|---|---|
 | `clusters/kind-single-node.yaml` | 1 control-plane | P01 | Smallest possible surface |
-| `clusters/kind-ingress.yaml` | 1 control-plane + 1 worker | P02, P03, P04, P06 | `extraPortMappings` 80/443 so Ingress works on `localhost` |
+| `clusters/kind-ingress.yaml` | 1 control-plane + 1 worker | P02, P04, P06 | `extraPortMappings` 80/443 so Ingress works on `localhost` |
+| `clusters/eks-lab.yaml` | EKS, 2 × t3.medium in 2 AZs | P03 | eksctl; EBS CSI + Pod Identity add-ons; ~$0.20/hour |
 | `clusters/kind-multi-node.yaml` | 1 control-plane + 3 workers, `topology.kubernetes.io/zone=a|b|c` | P05, P07, P08, P09 | Enables real scheduling, spread, drain, and taint labs |
 
 Each project README states which config it needs. Recreating a cluster takes ~60 seconds — when in doubt, delete and

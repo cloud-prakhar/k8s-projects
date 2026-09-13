@@ -1,0 +1,834 @@
+# 19-final/complete-production-manifest.yaml
+# ---------------------------------------------------------------------------
+# THE COMPLETE DESIRED STATE of Project 03, in one file (plus the two
+# ConfigMaps kustomization.yaml GENERATES from config/).
+#
+# ⚠️ Apply it through Kustomize — `kubectl apply -k manifests/19-final/`.
+#    Applied with -f alone, every workload references ConfigMaps named
+#    `shortener-config` / `redis-config` that do not exist, and pods sit in
+#    CreateContainerConfigError.
+#
+# WHAT IS DELIBERATELY ABSENT — teaching artifacts:
+#   • the mutable `shortener-config` and versioned -v1/-v2 ConfigMaps (stage 05/08)
+#     — replaced by hash-named generated ConfigMaps
+#   • `checksum/config` annotations — the generated name hash does that job now
+#   • the stand-alone postgres-data / redis-data PVCs and the Deployment versions
+#     of both datastores (stage 07) — the StatefulSets' claim templates own storage
+#
+# PREREQUISITES (cluster software, not this application):
+#   • the aws-ebs-csi-driver add-on — or no PVC ever binds
+#   • the AWS Load Balancer Controller + IngressClass `alb` — or no ALB appears
+# ---------------------------------------------------------------------------
+# --- Namespaces --------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: url-shortener
+  labels:
+    app.kubernetes.io/name: url-shortener
+    app.kubernetes.io/instance: url-shortener
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+    # ALB readiness gates: a pod is not Ready until its ALB target is healthy (stage 11)
+    elbv2.k8s.aws/pod-readiness-gate-inject: enabled
+  annotations:
+    kubernetes.io/description: "URL Shortener — web, API, PostgreSQL and Redis"
+    lab.k8s-project/stage: "00-namespace"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/instance: analytics
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Another team's analytics platform — the shortener's external dependency"
+    lab.k8s-project/stage: "00-namespace"
+---
+# --- Storage (cluster-scoped) ----------------------------------------------------
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: url-shortener-gp3
+  labels:
+    app.kubernetes.io/name: url-shortener-gp3
+    app.kubernetes.io/instance: url-shortener-gp3
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Encrypted gp3 EBS volumes for the shortener's datastores"
+    lab.k8s-project/stage: "07-storage"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# --- Secrets (stage 06) — 🧪 in Git for the lab only -----------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres-secret
+    app.kubernetes.io/instance: postgres-secret
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL password — shared by the database and the API"
+    lab.k8s-project/stage: "06-secrets"
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "dev-password-not-for-production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis-secret
+    app.kubernetes.io/instance: redis-secret
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis password — shared by Redis and the API"
+    lab.k8s-project/stage: "06-secrets"
+type: Opaque
+stringData:
+  REDIS_PASSWORD: "dev-redis-password-not-for-production"
+---
+# --- Services (stages 04, 08) ----------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for PostgreSQL"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Headless Service giving the PostgreSQL pod a stable DNS name"
+    lab.k8s-project/stage: "08-statefulsets"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "ClusterIP for Redis READS — any member will do"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Headless Service — per-pod DNS; writes go to redis-0 by name"
+    lab.k8s-project/stage: "08-statefulsets"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for the shortener API"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for the shortener UI"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/instance: analytics
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "DNS alias for the analytics team's collector (ExternalName → CNAME)"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ExternalName
+  externalName: analytics-collector.analytics.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-collector
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: analytics-collector
+    app.kubernetes.io/instance: analytics-collector
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "The analytics team's collector endpoint"
+    lab.k8s-project/stage: "04-services"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: analytics-collector
+    app.kubernetes.io/instance: analytics-collector
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# --- PostgreSQL (stages 08, 11) -----------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL — single-member StatefulSet, exec-probed, EBS-backed"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "17.5"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        storageClassName: url-shortener-gp3
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+# --- Redis primary + replica (stages 08, 11) -----------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis primary (ordinal 0) + replica (ordinal 1), exec-probed, EBS-backed"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  serviceName: redis-headless
+  replicas: 2
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: redis
+                    app.kubernetes.io/instance: redis
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /usr/local/etc/redis/redis.conf /run/redis/redis.conf
+              printf 'requirepass %s\nmasterauth %s\n' "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> /run/redis/redis.conf
+              ORDINAL="${HOSTNAME##*-}"
+              if [ "$ORDINAL" = "0" ]; then
+                echo "ordinal 0 → primary"
+              else
+                PRIMARY="redis-0.${HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local"
+                echo "ordinal ${ORDINAL} → replica of ${PRIMARY}"
+                printf 'replicaof %s 6379\n' "$PRIMARY" >> /run/redis/redis.conf
+              fi
+              exec redis-server /run/redis/redis.conf
+          env:
+            - name: HEADLESS_SERVICE
+              value: redis-headless
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: runtime-config
+              mountPath: /run/redis
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config          # rewritten to redis-config-<hash> by Kustomize
+        - name: runtime-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        storageClassName: url-shortener-gp3
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+# --- Application tiers (stages 03, 05, 06, 11) ---------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener API — migrated by an init container, three probes"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-api
+      app.kubernetes.io/instance: shortener-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-api
+        app.kubernetes.io/instance: shortener-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      initContainers:
+        - name: migrate
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "migrate.py"]
+          envFrom:
+            - configMapRef:
+                name: shortener-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+      containers:
+        - name: shortener-api
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shortener-config
+          env:
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener UI — probed"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-web
+      app.kubernetes.io/instance: shortener-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-web
+        app.kubernetes.io/instance: shortener-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-web
+          image: cloudprakhargupta/url-shortener:web-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SHORTENER_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: SHORTENER_API_URL
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-collector
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: analytics-collector
+    app.kubernetes.io/instance: analytics-collector
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Analytics event collector owned by another team (stand-in)"
+    lab.k8s-project/stage: "11-health-checks"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-collector
+      app.kubernetes.io/instance: analytics-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics-collector
+        app.kubernetes.io/instance: analytics-collector
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: analytics
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: analytics-collector
+          image: cloudprakhargupta/url-shortener:collector-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "48Mi"
+---
+# --- Ingress → ALB (stage 09) --------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: url-shortener-ingress
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: url-shortener-ingress
+    app.kubernetes.io/instance: url-shortener-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Internet-facing ALB: / to the UI, /api and /r to the API"
+    lab.k8s-project/stage: "09-ingress"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=20
+    # ⚠️ deploy.sh replaces this with your public IP /32 — an open URL shortener is an open redirector
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    alb.ingress.kubernetes.io/tags: project=url-shortener,managed-by=aws-load-balancer-controller
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: shortener-api
+                port:
+                  number: 8080
+          - path: /r
+            pathType: Prefix
+            backend:
+              service:
+                name: shortener-api
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shortener-web
+                port:
+                  number: 80

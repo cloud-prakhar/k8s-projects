@@ -1,0 +1,113 @@
+%% Project 03 — URL Shortener on EKS, Low-Level Design
+%% Every Kubernetes object the project creates in its FINAL state (stage 19),
+%% plus the AWS resources the controllers create from them.
+%% Source for the diagram in README.md §7.
+%%
+%% Render:  mmdc -i architecture.mmd -o architecture.png
+%% Palette: docs/CONVENTIONS.md §6.1 — the same colours mean the same layers in
+%%          all ten projects.
+flowchart TB
+    U["👤 User<br/>http://&lt;alb-hostname&gt;"]:::external
+
+    subgraph AWS["☁️ AWS account (created by controllers)"]
+        ALB["ALB k8s-urlshort-…<br/>listener :80 · inbound-cidrs"]:::external
+        EBS0["EBS vol-… gp3 · AZ a/b<br/>one per PVC"]:::storage
+    end
+
+    subgraph KS["📦 Namespace: kube-system (cluster software)"]
+        LBC["Deployment/aws-load-balancer-controller<br/>Pod Identity → IAM"]:::gateway
+        CSI["Deployment/ebs-csi-controller<br/>Pod Identity → IAM"]:::storage
+        DNS["Deployment/coredns<br/>Service kube-dns 10.100.0.10"]:::network
+    end
+
+    ICLASS["IngressClass/alb"]:::gateway
+    SC["StorageClass/url-shortener-gp3<br/>ebs.csi.aws.com · WaitForFirstConsumer"]:::storage
+
+    subgraph NS["📦 Namespace: url-shortener  (pod-readiness-gate-inject: enabled)"]
+        direction TB
+
+        ING["Ingress/url-shortener-ingress<br/>/ → web · /api,/r → api · target-type ip"]:::gateway
+
+        SVCW["Service/shortener-web<br/>ClusterIP :80"]:::network
+        DEPW["Deployment/shortener-web<br/>replicas 2"]:::workload
+        PW["Pod/shortener-web-…<br/>probes · readiness gate"]:::pod
+
+        SVCA["Service/shortener-api<br/>ClusterIP :8080"]:::network
+        DEPA["Deployment/shortener-api<br/>replicas 2 · maxUnavailable 0"]:::workload
+        PA["Pod/shortener-api-…<br/>init: migrate · probes"]:::pod
+
+        SVCR["Service/redis<br/>ClusterIP — READS"]:::network
+        SVCRH["Service/redis-headless<br/>clusterIP None"]:::network
+        STSR["StatefulSet/redis<br/>replicas 2 · OrderedReady"]:::workload
+        R0["Pod/redis-0<br/>primary"]:::pod
+        R1["Pod/redis-1<br/>replicaof redis-0.redis-headless"]:::pod
+        PVCR0["PVC/redis-data-redis-0"]:::storage
+        PVCR1["PVC/redis-data-redis-1"]:::storage
+
+        SVCP["Service/postgres<br/>ClusterIP :5432"]:::network
+        SVCPH["Service/postgres-headless<br/>clusterIP None"]:::network
+        STSP["StatefulSet/postgres<br/>replicas 1"]:::workload
+        P0["Pod/postgres-0<br/>exec pg_isready"]:::pod
+        PVCP0["PVC/postgres-data-postgres-0"]:::storage
+
+        EXT["Service/analytics<br/>ExternalName → CNAME"]:::network
+
+        CM["ConfigMap/shortener-config-&lt;hash&gt;<br/>immutable · generated"]:::config
+        CMR["ConfigMap/redis-config-&lt;hash&gt;<br/>redis.conf"]:::config
+        SECP["Secret/postgres-secret"]:::config
+        SECR["Secret/redis-secret"]:::config
+    end
+
+    subgraph ANS["📦 Namespace: analytics (another team)"]
+        SVCC["Service/analytics-collector<br/>ClusterIP :80"]:::network
+        PC["Pod/analytics-collector-…"]:::pod
+    end
+
+    U -->|"HTTP :80"| ALB
+    ING -.->|"ingressClassName"| ICLASS
+    LBC -.->|"reconciles"| ING
+    LBC -->|"creates + registers pod IPs"| ALB
+    ALB -->|"/ → pod IPs"| PW
+    ALB -->|"/api /r → pod IPs"| PA
+
+    SVCW --> PW
+    DEPW --> PW
+    PW -->|"SHORTENER_API_URL"| SVCA
+    SVCA --> PA
+    DEPA --> PA
+
+    PA -->|"writes → redis-0.redis-headless"| R0
+    PA -->|"reads"| SVCR
+    SVCR --> R0 & R1
+    R1 -->|"replication"| R0
+    SVCRH -.->|"per-pod A records"| R0 & R1
+    STSR --> R0 & R1
+    R0 --> PVCR0
+    R1 --> PVCR1
+
+    PA -->|"SQL"| SVCP --> P0
+    SVCPH -.-> P0
+    STSP --> P0 --> PVCP0
+
+    PA -->|"http://analytics/events"| EXT
+    EXT -.->|"CNAME"| SVCC --> PC
+
+    PA -.->|"resolves every name"| DNS
+
+    CM -.->|"envFrom"| PA
+    CM -.->|"configMapKeyRef"| PW & P0
+    CMR -.->|"subPath"| R0 & R1
+    SECP -.-> PA & P0
+    SECR -.-> PA & R0 & R1
+
+    SC -.->|"provisions via"| CSI
+    CSI -->|"CreateVolume"| EBS0
+    PVCR0 & PVCR1 & PVCP0 -.-> EBS0
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef gateway  fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef storage  fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81

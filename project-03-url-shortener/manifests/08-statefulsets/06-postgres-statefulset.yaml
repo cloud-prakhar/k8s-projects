@@ -1,0 +1,81 @@
+# 08-statefulsets/06-postgres-statefulset.yaml
+# WHY: One replica — PostgreSQL does not replicate itself because a manifest
+#      asks. What the StatefulSet adds over the stage 07 Deployment is identity:
+#      the pod is always `postgres-0`, its claim is always
+#      `postgres-data-postgres-0`, and deleting the workload never deletes the
+#      data. No `strategy: Recreate` is needed — a StatefulSet never runs two
+#      pods with the same ordinal at once, by design.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL — single-member StatefulSet with a templated EBS claim"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "statefulset,volumeclaimtemplates,pvc-retention"
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "17.5"
+    spec:
+      # Give PostgreSQL time to checkpoint and shut down cleanly on SIGTERM.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v2
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v2
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data              # → PVC postgres-data-postgres-0
+      spec:
+        storageClassName: url-shortener-gp3
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

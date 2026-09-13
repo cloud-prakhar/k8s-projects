@@ -1,0 +1,101 @@
+# 06-secrets/04-redis-deployment.yaml
+# WHAT CHANGED vs 05-configmaps/05-redis-deployment.yaml:
+#   Redis now requires a password, from Secret/redis-secret.
+#
+#   Redis reads its password from its CONFIG FILE, and the config file is a
+#   ConfigMap — where a password must never go. Passing `--requirepass $PW` on
+#   the command line would work, and would print the password in `ps`, in
+#   `kubectl describe pod`, and in every process listing on the node.
+#
+#   So a tiny start-up script builds the real config at runtime:
+#     ConfigMap redis.conf  +  "requirepass <from Secret>"  →  /run/redis/redis.conf
+#   in an in-memory emptyDir that only this pod can see, then `exec`s Redis.
+#
+#   Because `command:` replaces the image's entrypoint, nothing drops root for
+#   us any more — so the pod says explicitly to run as the image's redis user.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis — password from a Secret, injected into the config at start-up"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secretkeyref,emptydir-memory,runasuser"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+      annotations:
+        checksum/config: "70c9fca75d98218f7c9fd9d482705a571dd8228a4976695c95447a85503d5369"
+    spec:
+      securityContext:
+        runAsUser: 999                 # the `redis` user inside redis:8.2.9-alpine
+        runAsGroup: 1000
+        fsGroup: 1000                  # volumes are made group-writable for GID 1000
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /usr/local/etc/redis/redis.conf /run/redis/redis.conf
+              printf 'requirepass %s\nmasterauth %s\n' "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> /run/redis/redis.conf
+              # exec: Redis REPLACES the shell as PID 1, so it receives SIGTERM
+              # directly and can flush the AOF before the pod stops.
+              exec redis-server /run/redis/redis.conf
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            # redis-cli reads REDISCLI_AUTH, so `kubectl exec … redis-cli` works
+            # without typing the password (and without it landing in shell history).
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: runtime-config
+              mountPath: /run/redis
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: runtime-config
+          emptyDir:
+            medium: Memory             # tmpfs: the rendered file never touches a disk
+            sizeLimit: 1Mi

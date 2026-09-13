@@ -1,0 +1,42 @@
+# 08-statefulsets/01-redis-headless-service.yaml
+# WHY: With two Redis pods that are NOT interchangeable — one primary that takes
+#      writes, one replica that copies it — "some Redis pod" is the wrong
+#      answer. Clients and the replica itself need to name ONE specific member.
+#
+#      A headless Service (clusterIP: None) allocates no virtual IP. CoreDNS
+#      answers with the pod IPs themselves, and — for the StatefulSet that names
+#      this Service in `serviceName` — publishes one record PER POD:
+#
+#          redis-0.redis-headless.url-shortener.svc.cluster.local  → the primary
+#          redis-1.redis-headless.url-shortener.svc.cluster.local  → the replica
+#
+#      Those names belong to the ordinals forever, whichever node or IP the pods
+#      get. The ClusterIP Service `redis` from stage 04 stays, for "any member".
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Headless Service giving each Redis pod a stable DNS name"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns,srv-records"
+spec:
+  clusterIP: None                      # ← the only line that makes it headless
+  # Publish DNS records for pods that are not Ready yet. A replica must be able
+  # to resolve its primary WHILE it is starting — exactly when it is not Ready.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

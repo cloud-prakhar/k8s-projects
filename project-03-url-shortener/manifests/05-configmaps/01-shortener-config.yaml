@@ -1,0 +1,42 @@
+# 05-configmaps/01-shortener-config.yaml
+# WHY: The same connection details were copied into three workload specs
+#      (API, web, database), and CODE_LENGTH — a value every API replica MUST
+#      agree on — sat inside one Deployment's env block. A ConfigMap moves
+#      configuration out of the workloads into one object they all reference.
+#
+# ⚠️ This first version is MUTABLE. §9 of the stage README edits it under a
+#    running fleet and produces a split-brain outage. The fix is 06-…-v1.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortener-config
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-config
+    app.kubernetes.io/instance: shortener-config
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Non-confidential configuration for the shortener (mutable — superseded)"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap,envfrom,configmapkeyref"
+data:
+  CONFIG_VERSION: "mutable"
+  APP_ENV: "lab"
+  LOG_LEVEL: "info"
+  # Fully qualified names from here on. They work from ANY namespace, and they
+  # are unambiguous when you read them. (Stage 04 §8 shows the one cost: with
+  # the default ndots:5 the resolver still tries the search list first.)
+  POSTGRES_HOST: "postgres.url-shortener.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "shortener"
+  POSTGRES_USER: "shortener"
+  REDIS_WRITE_HOST: "redis.url-shortener.svc.cluster.local"
+  REDIS_READ_HOST: "redis.url-shortener.svc.cluster.local"
+  REDIS_PORT: "6379"
+  CODE_LENGTH: "6"
+  CACHE_TTL_SECONDS: "300"
+  PUBLIC_BASE_URL: ""                  # blank = derive from the request's Host
+  ANALYTICS_URL: "http://analytics.url-shortener.svc.cluster.local/events"
+  SHORTENER_API_URL: "http://shortener-api.url-shortener.svc.cluster.local:8080"

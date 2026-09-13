@@ -1,0 +1,58 @@
+# 05-configmaps/03-shortener-api-deployment.yaml
+# WHAT CHANGED vs 03-deployments/shortener-api-deployment.yaml:
+#   Fourteen literal env entries became one `envFrom` reference to
+#   ConfigMap/shortener-config. The password stays literal until stage 06 —
+#   it must never go into a ConfigMap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener API — configuration from a (mutable) ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "envfrom"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-api
+      app.kubernetes.io/instance: shortener-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-api
+        app.kubernetes.io/instance: shortener-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-api
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            # Every key becomes an env var — read ONCE, when the container starts.
+            # Edit the ConfigMap later and this running process never finds out.
+            - configMapRef:
+                name: shortener-config
+          env:
+            - name: POSTGRES_PASSWORD           # ⚠️ still plaintext — stage 06
+              value: "dev-password-not-for-production"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

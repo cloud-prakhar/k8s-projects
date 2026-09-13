@@ -1,0 +1,19 @@
+# 00-namespace/01-url-shortener-namespace.yaml
+# WHY: Everything the URL Shortener owns must be deletable in one command, and
+#      its Service names (`postgres`, `redis`) must not collide with any other
+#      application on a shared EKS cluster. The namespace name is also part of
+#      every DNS name this project resolves — `redis.url-shortener.svc.cluster.local`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: url-shortener
+  labels:
+    app.kubernetes.io/name: url-shortener
+    app.kubernetes.io/instance: url-shortener
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    kubernetes.io/description: "URL Shortener — web, API, PostgreSQL and Redis"
+    lab.k8s-project/stage: "00-namespace"
+    lab.k8s-project/teaches: "namespaces,dns-scope,cleanup"

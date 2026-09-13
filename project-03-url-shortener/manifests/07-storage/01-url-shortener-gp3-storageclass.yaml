@@ -1,0 +1,48 @@
+# 07-storage/01-url-shortener-gp3-storageclass.yaml
+# WHY: A PersistentVolumeClaim is a REQUEST for storage; something has to turn
+#      it into a real disk. On EKS that something is the EBS CSI driver, and a
+#      StorageClass is how a claim asks for it — which driver, which EBS volume
+#      type, encrypted or not, and what happens to the disk when the claim goes.
+#
+#      We write our own instead of relying on a cluster default because on a
+#      new EKS cluster there may BE no default (stage 07 §9 proves it), and
+#      because the pre-installed `gp2` class uses the older, slower, pricier
+#      volume type.
+#
+# Cluster-scoped: it has no namespace, and deleting the namespace does NOT
+# delete it. scripts/cleanup.sh removes it explicitly.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: url-shortener-gp3
+  labels:
+    app.kubernetes.io/name: url-shortener-gp3
+    app.kubernetes.io/instance: url-shortener-gp3
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Encrypted gp3 EBS volumes for the shortener's datastores"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "storageclass,ebs-csi,dynamic-provisioning,waitforfirstconsumer"
+# The CSI driver installed by the aws-ebs-csi-driver EKS add-on. A typo here
+# and every claim sits in Pending with "waiting for a volume to be created,
+# either by external provisioner … or manually created by system administrator".
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3                            # baseline 3000 IOPS / 125 MiB/s regardless of size
+  encrypted: "true"                    # AWS-managed KMS key; costs nothing extra
+  # tagSpecification_1: "project=url-shortener"   # tag the EBS volumes if you want to find them in the console
+# Delete: the EBS volume is destroyed when its claim is deleted. Convenient in a
+# lab, and exactly one mistyped `kubectl delete pvc` away from data loss.
+# 🏭 Retain for anything you cannot recreate.
+reclaimPolicy: Delete
+# THE setting that matters most on EKS. An EBS volume lives in ONE availability
+# zone and can only attach to a node in that zone. Immediate binding would
+# create the disk before the scheduler has chosen a node — possibly in the wrong
+# AZ, leaving the pod unschedulable forever. WaitForFirstConsumer delays
+# creation until the pod is scheduled, then creates the disk in the pod's AZ.
+volumeBindingMode: WaitForFirstConsumer
+# EBS volumes can grow online. Edit the claim's size; the driver resizes the
+# volume and the filesystem without restarting the pod.
+allowVolumeExpansion: true

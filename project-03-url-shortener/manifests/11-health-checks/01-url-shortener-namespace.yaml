@@ -1,0 +1,29 @@
+# 11-health-checks/01-url-shortener-namespace.yaml
+# WHAT CHANGED vs 00-namespace/01-url-shortener-namespace.yaml:
+#   One label: `elbv2.k8s.aws/pod-readiness-gate-inject: enabled`.
+#
+# WHY: With target-type ip the ALB health-checks pods ITSELF. A new pod can pass
+#      its readiness probe — so the Deployment deletes an old pod — while the ALB
+#      still has the new one in `initial` state and is not yet sending it traffic.
+#      Do that twice in a rolling update and the target group briefly has no
+#      healthy targets: 503s during a "zero-downtime" rollout.
+#
+#      With this label the controller's webhook adds a READINESS GATE to every new
+#      pod in the namespace. The pod does not count as Ready until the ALB reports
+#      its target healthy, so the rollout waits for the load balancer, not just
+#      the kubelet. Only pods created AFTER the label get the gate.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: url-shortener
+  labels:
+    app.kubernetes.io/name: url-shortener
+    app.kubernetes.io/instance: url-shortener
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+    elbv2.k8s.aws/pod-readiness-gate-inject: enabled
+  annotations:
+    kubernetes.io/description: "URL Shortener — web, API, PostgreSQL and Redis"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "namespaces,alb-pod-readiness-gate"

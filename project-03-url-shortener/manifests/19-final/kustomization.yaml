@@ -1,0 +1,49 @@
+# 19-final/kustomization.yaml
+# WHY: Stage 05 made config changes safe by hand: immutable ConfigMaps with a
+#      version in the name, a pod-template edit to roll onto them, and a sha256
+#      annotation to roll Redis when its file changed. Every step was manual.
+#
+#      A configMapGenerator does all of it. It builds each ConfigMap from files,
+#      appends a HASH OF THE CONTENT to the name (shortener-config-7g2h9kc5bt),
+#      marks it immutable, and rewrites every reference in every workload to that
+#      exact name. Change one byte of config/ → new name → pod templates change →
+#      a rollout. Nothing to remember.
+#
+# Preview (ALWAYS before applying):  kubectl kustomize manifests/19-final/
+# Apply:                             kubectl apply -k manifests/19-final/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# NOTE: no top-level `namespace:`. It would force EVERY object into one namespace —
+# including the analytics collector, which lives in `analytics`.
+
+resources:
+  - complete-production-manifest.yaml
+
+generatorOptions:
+  immutable: true
+
+configMapGenerator:
+  - name: shortener-config
+    namespace: url-shortener
+    envs:
+      - config/shortener.env
+  - name: redis-config
+    namespace: url-shortener
+    files:
+      - config/redis.conf
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false     # ⚠️ NEVER true: it would rewrite immutable selectors
+
+# Retarget images here, never in the manifest. ECR instead of Docker Hub:
+#   newName: <account>.dkr.ecr.<region>.amazonaws.com/url-shortener
+images:
+  - name: cloudprakhargupta/url-shortener
+    newName: cloudprakhargupta/url-shortener
+  - name: postgres
+    newTag: "17.5-alpine"
+  - name: redis
+    newTag: "8.2.9-alpine"

@@ -1,14 +1,22 @@
 # Cluster Configurations
 
-Reusable Kind cluster definitions. Each project's README states which one it needs.
+Reusable cluster definitions. Each project's README states which one it needs.
 
-| Config | Nodes | Ports 80/443 | Zone labels | Used by |
-|---|---|---|---|---|
-| [`kind-single-node.yaml`](kind-single-node.yaml) | 1 (control-plane) | ❌ | ❌ | P01 |
-| [`kind-ingress.yaml`](kind-ingress.yaml) | 2 (cp + worker) | ✅ | ❌ | P02, P03, P04, P06 |
-| [`kind-multi-node.yaml`](kind-multi-node.yaml) | 4 (cp + 3 workers) | ✅ | ✅ `zone-a/b/c` | P05, P07, P08, P09 |
+| Config | Platform | Nodes | Ports 80/443 | Zones | Used by |
+|---|---|---|---|---|---|
+| [`kind-single-node.yaml`](kind-single-node.yaml) | Kind | 1 (control-plane) | ❌ | ❌ | P01 |
+| [`kind-ingress.yaml`](kind-ingress.yaml) | Kind | 2 (cp + worker) | ✅ | ❌ | P02, P04, P06 |
+| [`kind-multi-node.yaml`](kind-multi-node.yaml) | Kind | 4 (cp + 3 workers) | ✅ | ✅ labels `zone-a/b/c` | P05, P07, P08, P09 |
+| [`eks-lab.yaml`](eks-lab.yaml) | **AWS EKS** (eksctl) | 2 × t3.medium managed | via ALB | ✅ real AZs | **P03** |
 
-All three use the cluster name `kubernetes-lab`, so the kube-context is always `kind-kubernetes-lab`.
+The Kind configs use the cluster name `kubernetes-lab` (context `kind-kubernetes-lab`). The EKS config also uses
+`kubernetes-lab` (context `<user>@kubernetes-lab.<region>.eksctl.io`).
+
+> 💰 **`eks-lab.yaml` costs ~$0.20/hour while it exists** (plus ~$0.02/hour per ALB). Create it with
+> `eksctl create cluster --config-file clusters/eks-lab.yaml`, and delete it — after deleting every Ingress and
+> `LoadBalancer` Service — with `eksctl delete cluster --config-file clusters/eks-lab.yaml --disable-nodegroup-eviction`.
+> It includes the VPC CNI, CoreDNS, kube-proxy, EKS Pod Identity agent and EBS CSI driver add-ons, and a Pod Identity
+> association for the AWS Load Balancer Controller; no NAT gateway (nodes in public subnets) to keep lab costs down.
 
 ---
 

@@ -1,0 +1,61 @@
+# 05-configmaps/04-shortener-web-deployment.yaml
+# WHAT CHANGED vs 03-deployments/shortener-web-deployment.yaml:
+#   Two keys are picked individually with configMapKeyRef instead of envFrom —
+#   the web tier needs two of the sixteen keys, and this style makes the
+#   dependency visible in the manifest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener UI — API address from a (mutable) ConfigMap"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmapkeyref"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-web
+      app.kubernetes.io/instance: shortener-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-web
+        app.kubernetes.io/instance: shortener-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-web
+          image: cloudprakhargupta/url-shortener:web-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SHORTENER_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: SHORTENER_API_URL   # missing key ⇒ CreateContainerConfigError
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"

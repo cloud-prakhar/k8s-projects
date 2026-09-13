@@ -613,4 +613,4 @@ Project 03 is a URL shortener with **PostgreSQL and Redis**, real per-pod DNS,
 immutable ConfigMaps, `checksum/config` rollout triggers, and an `ExternalName`
 Service pointing out of the cluster.
 
-→ **Project 03 — URL Shortener**
+→ **[Project 03 — URL Shortener](../project-03-url-shortener/README.md)** (runs on AWS EKS)

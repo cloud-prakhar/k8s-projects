@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shared-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shared-demo
+  template:
+    metadata:
+      labels:
+        app: shared-demo
+    spec:
+      # forces all replicas onto one node so the RWO volume can be shared
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: shared-demo
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: app
+          image: nginx
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: shared-pvc

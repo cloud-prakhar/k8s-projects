@@ -1,0 +1,28 @@
+# 04-services/shortener-web-service.yaml
+# WHY: Nothing calls the UI by name yet — but `kubectl port-forward svc/…`
+#      needs a Service, and in stage 09 the ALB will find its targets through it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for the shortener UI"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,port-mapping"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+  ports:
+    - name: http
+      port: 80                         # what clients call
+      targetPort: http                 # what the container listens on (8080)
+      protocol: TCP

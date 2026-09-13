@@ -1,0 +1,62 @@
+# 08-statefulsets/04-shortener-api-deployment.yaml
+# WHAT CHANGED vs 06-secrets/05-shortener-api-deployment.yaml:
+#   envFrom references shortener-config-v2 — writes go to redis-0 by name.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener API — config v2: Redis writes to the primary, reads to any member"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "per-pod-dns-client,versioned-config-rollout"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-api
+      app.kubernetes.io/instance: shortener-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-api
+        app.kubernetes.io/instance: shortener-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-api
+          image: cloudprakhargupta/url-shortener:api-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shortener-config-v2   # ← v1 → v2 is the whole change
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

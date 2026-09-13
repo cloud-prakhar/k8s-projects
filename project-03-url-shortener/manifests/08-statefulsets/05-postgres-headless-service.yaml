@@ -1,0 +1,31 @@
+# 08-statefulsets/05-postgres-headless-service.yaml
+# WHY: PostgreSQL moves to a StatefulSet too — for its stable name and for a
+#      claim that belongs to the ordinal rather than to a hand-made PVC. A
+#      StatefulSet REQUIRES a governing headless Service (`serviceName`), even
+#      with one replica. Clients keep using the ClusterIP Service `postgres`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Headless Service giving the PostgreSQL pod a stable DNS name"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP

@@ -1,0 +1,63 @@
+# 11-health-checks/06-analytics-collector-deployment.yaml
+# WHAT CHANGED vs 03-deployments/analytics-collector-deployment.yaml:
+#   Readiness and liveness probes. Without readiness, a collector pod that is
+#   still starting is already an endpoint of its Service, and click events sent
+#   in that window are refused — which the API records as analytics failures.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-collector
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: analytics-collector
+    app.kubernetes.io/instance: analytics-collector
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Analytics event collector owned by another team (stand-in), probed"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "readiness,liveness"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-collector
+      app.kubernetes.io/instance: analytics-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics-collector
+        app.kubernetes.io/instance: analytics-collector
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: analytics
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: analytics-collector
+          image: cloudprakhargupta/url-shortener:collector-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "48Mi"

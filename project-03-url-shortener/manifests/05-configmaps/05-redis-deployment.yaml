@@ -1,0 +1,71 @@
+# 05-configmaps/05-redis-deployment.yaml
+# WHAT CHANGED vs 03-deployments/redis-deployment.yaml:
+#   1. redis.conf comes from ConfigMap/redis-config, mounted as a single file.
+#   2. A `checksum/config` annotation on the POD TEMPLATE carries a hash of that
+#      file. Change the file → recompute the hash → the template changed → the
+#      Deployment rolls. That is the only thing that makes a subPath-mounted
+#      config change take effect.
+#   3. A memory LIMIT, because redis.conf now sets maxmemory and the two must
+#      agree.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis — configured from a mounted redis.conf, rolled on config change"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "configmap-volume,subpath,checksum-annotation"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+      annotations:
+        # sha256 of the redis.conf key in 02-redis-config.yaml. Recompute with:
+        #   kubectl get configmap redis-config -n url-shortener \
+        #     -o jsonpath='{.data.redis\.conf}' | sha256sum
+        checksum/config: "70c9fca75d98218f7c9fd9d482705a571dd8228a4976695c95447a85503d5369"
+    spec:
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              # subPath mounts ONE key as ONE file, without hiding the rest of
+              # the directory. The price: the kubelet never refreshes it.
+              subPath: redis.conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              # Must stay comfortably above `maxmemory 100mb`: Redis also needs
+              # memory for connections, buffers and the AOF rewrite.
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config

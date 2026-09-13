@@ -1,0 +1,55 @@
+# 03-deployments/postgres-deployment.yaml
+# WHY: PostgreSQL is the source of truth — every short link is a row. We start
+#      it the way everybody starts a database the first time: an ordinary
+#      Deployment, no storage, no Secret. Each of those gaps becomes a failure
+#      you watch happen in a later stage.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL — the durable store for short links (no storage yet)"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,stateful-antipattern"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:                       # immutable after creation — keep it minimal
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine  # public image, pulled from Docker Hub by the node
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres           # named, so Services can target the name
+              containerPort: 5432
+          env:
+            # The image's entrypoint creates this database and user on first start.
+            - name: POSTGRES_DB
+              value: "shortener"
+            - name: POSTGRES_USER
+              value: "shortener"
+            # ⚠️ A plaintext password in a manifest. It stays here until stage 06.
+            - name: POSTGRES_PASSWORD
+              value: "dev-password-not-for-production"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

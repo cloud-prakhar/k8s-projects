@@ -1,0 +1,60 @@
+# 05-configmaps/08-shortener-web-deployment-v1.yaml
+# WHAT CHANGED vs 04-shortener-web-deployment.yaml:
+#   Both configMapKeyRefs point at the immutable `shortener-config-v1`, so the
+#   mutable `shortener-config` has no consumers left and can be deleted.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener-web
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-web
+    app.kubernetes.io/instance: shortener-web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Shortener UI — API address from immutable ConfigMap v1"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "immutable-configmap,configmapkeyref"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shortener-web
+      app.kubernetes.io/instance: shortener-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shortener-web
+        app.kubernetes.io/instance: shortener-web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: shortener-web
+          image: cloudprakhargupta/url-shortener:web-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SHORTENER_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v1
+                  key: SHORTENER_API_URL
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: shortener-config-v1
+                  key: APP_ENV
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"

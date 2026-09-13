@@ -1,0 +1,30 @@
+# 04-services/redis-service.yaml
+# WHY: Same failure, same fix: `redis` did not resolve. With ONE Redis pod,
+#      a load-balanced ClusterIP is exactly right. Keep an eye on this object —
+#      in stage 08, when there are two Redis pods with different roles, "load
+#      balanced" stops being a feature and starts eating writes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for Redis (any member)"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,dns-a-record"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

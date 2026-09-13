@@ -1,0 +1,30 @@
+# 04-services/postgres-service.yaml
+# WHY: The API asked CoreDNS for `postgres` and got NXDOMAIN — a pod's name is
+#      not a DNS name, and a Deployment registers nothing in DNS. A Service does:
+#      creating it makes `postgres.url-shortener.svc.cluster.local` resolvable
+#      (and, through the pod's DNS search path, plain `postgres` too).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for PostgreSQL"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,dns-a-record,endpointslice"
+spec:
+  type: ClusterIP
+  selector:                            # must match the pod TEMPLATE labels
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres             # the container's NAMED port
+      protocol: TCP

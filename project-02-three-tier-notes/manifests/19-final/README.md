@@ -269,4 +269,4 @@ Everything above is self-contained — these are for going deeper, not for filli
 
 | ◀ Previous | ▲ Up | Next ▶ |
 |---|:--:|---:|
-| ◀ **[11 Probes](../11-health-checks/README.md)** | [Project 02](../../README.md) · [Manual steps](../../scripts/manual-steps.md) | **[Project 03 →](../../../docs/ROADMAP.md#project-03--url-shortener)** ▶ |
+| ◀ **[11 Probes](../11-health-checks/README.md)** | [Project 02](../../README.md) · [Manual steps](../../scripts/manual-steps.md) | **[Project 03 →](../../../project-03-url-shortener/README.md)** ▶ |

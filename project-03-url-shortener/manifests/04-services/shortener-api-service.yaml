@@ -1,0 +1,28 @@
+# 04-services/shortener-api-service.yaml
+# WHY: The web tier's SHORTENER_API_URL names `shortener-api`. This Service
+#      makes that name resolve, and spreads connections across both API replicas.
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortener-api
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable DNS name and ClusterIP for the shortener API"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,load-balancing"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shortener-api
+    app.kubernetes.io/instance: shortener-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

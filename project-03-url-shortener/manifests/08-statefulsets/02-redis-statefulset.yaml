@@ -1,0 +1,142 @@
+# 08-statefulsets/02-redis-statefulset.yaml
+# WHY: Scaling the Redis Deployment to 2 gave two unrelated Redis servers with
+#      two different sets of counters (one of them on a brand-new empty disk, or
+#      stuck in ContainerCreating on a Multi-Attach error). A Deployment cannot
+#      give replicas different ROLES, different DISKS, or stable NAMES.
+#
+#      A StatefulSet gives all three:
+#        • names    — redis-0, redis-1: the ordinal is the identity
+#        • storage  — one PVC per ordinal from volumeClaimTemplates, reattached
+#                     to the same ordinal forever
+#        • DNS      — redis-N.redis-headless.<ns>.svc.cluster.local
+#        • ordering — redis-1 is created only after redis-0 is Ready
+#
+#      The start-up script uses the ordinal to choose a role: ordinal 0 is the
+#      primary; every other ordinal replicates FROM redis-0 BY ITS PER-POD NAME.
+#      That one line is why this project needs a headless Service.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: url-shortener
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: url-shortener
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis primary (ordinal 0) + replica (ordinal 1), each with its own EBS volume"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "statefulset,volumeclaimtemplates,per-pod-dns,ordinal-roles"
+spec:
+  serviceName: redis-headless          # ← which headless Service owns the per-pod DNS
+  replicas: 2
+  podManagementPolicy: OrderedReady    # replica starts only after the primary is Ready
+  updateStrategy:
+    type: RollingUpdate                # highest ordinal first: replica, then primary
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: url-shortener
+        app.kubernetes.io/version: "8.2.9"
+      annotations:
+        checksum/config: "70c9fca75d98218f7c9fd9d482705a571dd8228a4976695c95447a85503d5369"
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      # Prefer different nodes for primary and replica, so one node failure does
+      # not take both. PREFERRED, not required: on a one-node cluster both still run.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: redis
+                    app.kubernetes.io/instance: redis
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /usr/local/etc/redis/redis.conf /run/redis/redis.conf
+              printf 'requirepass %s\nmasterauth %s\n' "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> /run/redis/redis.conf
+              # A StatefulSet pod's hostname IS its name: redis-0, redis-1.
+              ORDINAL="${HOSTNAME##*-}"
+              if [ "$ORDINAL" = "0" ]; then
+                echo "ordinal 0 → primary"
+              else
+                PRIMARY="redis-0.${HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local"
+                echo "ordinal ${ORDINAL} → replica of ${PRIMARY}"
+                printf 'replicaof %s 6379\n' "$PRIMARY" >> /run/redis/redis.conf
+              fi
+              exec redis-server /run/redis/redis.conf
+          env:
+            - name: HEADLESS_SERVICE
+              value: redis-headless
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: runtime-config
+              mountPath: /run/redis
+            - name: redis-data           # ← refers to the volumeClaimTemplate below
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: runtime-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # Note what is ABSENT: no volume for redis-data. The claim template
+        # creates one PVC per pod and wires it in by name.
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data                 # → PVCs redis-data-redis-0, redis-data-redis-1
+      spec:
+        storageClassName: url-shortener-gp3
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

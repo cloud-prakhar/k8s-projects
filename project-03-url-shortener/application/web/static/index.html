@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>URL Shortener — Kubernetes Project Lab</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 760px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; gap: .5rem; margin: 1.5rem 0; }
+  input { flex: 1; min-width: 0; padding: .55rem .7rem; border: 1px solid #94a3b8; border-radius: 6px; font: inherit; }
+  button { padding: .55rem .9rem; border: 0; border-radius: 6px; background: #7c3aed; color: #fff; font: inherit; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .3rem; border-bottom: 1px solid #cbd5e1; vertical-align: top; }
+  td.url { word-break: break-all; color: #64748b; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  code, a.short { font-family: ui-monospace, monospace; }
+  #meta { margin-top: 2rem; padding: .75rem; border-radius: 6px; background: #f1f5f9; color: #0f172a; font: .8rem ui-monospace, monospace; white-space: pre-wrap; }
+  #err { color: #dc2626; font: .85rem ui-monospace, monospace; white-space: pre-wrap; }
+  #made { font: .9rem ui-monospace, monospace; }
+</style>
+
+<h1>🔗 URL Shortener</h1>
+<p style="font-size:.85rem;color:#64748b">
+  Links live in PostgreSQL. Redis caches them and counts clicks. Kill Redis and
+  the links still work — the clicks column turns to <code>?</code>.
+</p>
+<form id="f"><input id="u" placeholder="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/" autocomplete="off"><button>Shorten</button></form>
+<div id="made"></div>
+<div id="err"></div>
+<table>
+  <thead><tr><th>Short link</th><th>Target</th><th class="n">Clicks</th></tr></thead>
+  <tbody id="list"></tbody>
+</table>
+<!-- Which API pod answered, which ConfigMap version it runs, and which Redis
+     member each Service name reached. Stages 05 and 08 are read off this box. -->
+<div id="meta">loading…</div>
+
+<script>
+const err = document.getElementById("err");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function member(m) {
+  if (!m) return "?";
+  if (!m.reachable) return `${m.host}  UNREACHABLE (${m.error})`;
+  return `${m.host}  role=${m.role}` + (m.primary_host ? ` primary=${m.primary_host}` : "");
+}
+
+async function load() {
+  err.textContent = "";
+  try {
+    const r = await fetch("/api/links");
+    if (!r.ok) throw new Error(`API returned ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const links = await r.json();
+    document.getElementById("list").innerHTML = links.map(l =>
+      `<tr><td><a class="short" href="/r/${esc(l.code)}" target="_blank">/r/${esc(l.code)}</a></td>` +
+      `<td class="url">${esc(l.target_url)}</td>` +
+      `<td class="n">${l.clicks === null ? "?" : l.clicks}</td></tr>`
+    ).join("") || `<tr><td colspan="3"><em>no links yet</em></td></tr>`;
+  } catch (e) { err.textContent = "Cannot load links: " + e.message; }
+  try {
+    const i = await (await fetch("/api/info")).json();
+    document.getElementById("meta").textContent =
+      `served by pod  : ${i.pod}\n` +
+      `config version : ${i.config_version}   code_length=${i.code_length}   cache_ttl=${i.cache_ttl_seconds}s\n` +
+      `postgres       : ${i.postgres.host}  connected=${i.postgres.connected}  links=${i.postgres.link_count}\n` +
+      `redis (write)  : ${member(i.redis_write)}\n` +
+      `redis (read)   : ${member(i.redis_read)}\n` +
+      `analytics      : ${i.analytics_url || "-"}  sent=${i.stats.analytics_sent} failed=${i.stats.analytics_failed}\n` +
+      `redis write errors on this pod: ${i.stats.redis_write_errors}` +
+      (i.stats.redis_last_write_error ? `  (${i.stats.redis_last_write_error})` : "");
+  } catch { document.getElementById("meta").textContent = "backend info unavailable"; }
+}
+
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const u = document.getElementById("u");
+  if (!u.value.trim()) return;
+  const r = await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u.value.trim() }) });
+  const body = await r.json().catch(() => ({}));
+  document.getElementById("made").innerHTML = r.ok
+    ? `Created <a class="short" href="${esc(body.short_url)}" target="_blank">${esc(body.short_url)}</a> on ${esc(body.pod)}`
+    : `<span style="color:#dc2626">${esc(body.error || r.status)}</span>`;
+  if (r.ok) u.value = "";
+  load();
+};
+load(); setInterval(load, 5000);
+</script>
