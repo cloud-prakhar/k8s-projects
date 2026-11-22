@@ -1,0 +1,30 @@
+# 07-storage/01-ecommerce-gp3-storageclass.yaml
+# WHY: Stage 06 replaced the PostgreSQL and Redis pods and every order and basket
+#      vanished — both wrote to the container's own filesystem. A PVC needs a
+#      StorageClass to say HOW to make a volume, and a new EKS cluster has only
+#      `gp2`, NOT marked default. A claim naming no class binds to nothing.
+#
+#      CLUSTER-SCOPED: no namespace. That is why cleanup must delete it explicitly.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ecommerce-gp3
+  labels:
+    app.kubernetes.io/name: ecommerce-gp3
+    app.kubernetes.io/instance: ecommerce-gp3
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Encrypted gp3 EBS volumes for the shop's datastores"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "storageclass,ebs-csi,waitforfirstconsumer"
+provisioner: ebs.csi.aws.com          # the EBS CSI driver add-on
+parameters:
+  type: gp3
+  encrypted: "true"                   # parameters are strings — quote them
+reclaimPolicy: Delete                 # 🧪 lab: deleting the claim deletes the EBS volume
+# Create the volume only once a pod needs it, IN THAT POD'S AZ. EBS is zonal:
+# `Immediate` would pick an AZ at random and could strand the pod.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

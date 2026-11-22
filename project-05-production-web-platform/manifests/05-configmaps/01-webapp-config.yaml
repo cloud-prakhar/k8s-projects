@@ -1,0 +1,27 @@
+# 05-configmaps/01-webapp-config.yaml
+# WHY: The app's dials belong outside the image. The one that matters most is
+#      STARTUP_DELAY_SECONDS: a realistic app spends seconds warming up (loading
+#      config, caches, JIT, connection pools) before it can serve. Eight seconds
+#      here makes that visible — and makes stage 11's startup and readiness
+#      probes necessary rather than decorative.
+#
+# Values are strings, always — quote numbers.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-config
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: webapp-config
+    app.kubernetes.io/instance: webapp-config
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Runtime dials for the web app
+    lab.k8s-project/stage: 05-configmaps
+    lab.k8s-project/teaches: configmap,envfrom
+data:
+  STARTUP_DELAY_SECONDS: '8'
+  MAX_WORK_MS: '2000'
+  MAX_MEMORY_MB: '1024'

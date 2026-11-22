@@ -1,0 +1,34 @@
+# 15-security/01-default-deny-all.yaml
+# WHY: The pod network is FLAT. Every pod can reach every other pod, in every
+#      namespace, on every port — you proved it in stage 04 when a throwaway pod
+#      authorised a $9,999.99 payment. A NetworkPolicy is the only object that
+#      changes that, and the safe starting point is to deny EVERYTHING and then
+#      allow exactly the edges the call graph needs.
+#
+# HOW IT WORKS: `podSelector: {}` selects every pod in this namespace. Listing
+# both policyTypes with NO rules means "these pods are now isolated for ingress
+# AND egress, and nothing is allowed". Pods not selected by any policy are
+# unrestricted — isolation is opt-in, per direction.
+#
+# ⚠️ APPLY THIS ALONE FIRST and watch what happens: the whole shop breaks —
+#    including DNS. Every egress, to CoreDNS on port 53 too, is now denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: default-deny-all
+    app.kubernetes.io/instance: default-deny-all
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Isolate every pod in the namespace for ingress and egress; allow rules follow"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,default-deny"
+spec:
+  podSelector: {}            # every pod in `ecommerce`
+  policyTypes:
+    - Ingress
+    - Egress
+  # no ingress:/egress: rules at all ⇒ nothing is allowed in either direction

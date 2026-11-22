@@ -1,0 +1,34 @@
+# 12-resources/02-resourcequota.yaml
+# WHY: A LimitRange bounds ONE container. A ResourceQuota bounds the WHOLE
+#      namespace: the sum of all requests and limits, and the pod count. It is
+#      what stops stage 13's autoscaler — or a runaway `kubectl scale` — from
+#      claiming the entire cluster.
+#
+# Sized for this lab's 3 × t3.medium (6 vCPU, ~11 GiB allocatable in total):
+#   requests.cpu 3  → at 100m per webapp pod, room for ~25 pods plus loadgen
+#
+# ⚠️ Once a quota covers requests/limits, EVERY new pod in the namespace must
+#    declare them (or get them from a LimitRange) — or it is rejected.
+#    The rejection lands on the ReplicaSet, not on a pod: `kubectl describe rs`.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: web-platform-quota
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-quota
+    app.kubernetes.io/instance: web-platform-quota
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Upper bound on what the whole namespace may request
+    lab.k8s-project/stage: 12-resources
+    lab.k8s-project/teaches: resourcequota
+spec:
+  hard:
+    requests.cpu: '3'
+    requests.memory: 3Gi
+    limits.cpu: '8'
+    limits.memory: 6Gi
+    pods: '30'

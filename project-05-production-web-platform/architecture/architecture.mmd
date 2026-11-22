@@ -1,0 +1,59 @@
+%% Project 05 — Production Web Platform on EKS, Low-Level Design
+%% Every Kubernetes object in the FINAL state (stage 19), the cluster software it
+%% depends on, and the AWS resources the controllers create.
+%% Source for README.md §7. Palette: docs/CONVENTIONS.md §6.1.
+flowchart TB
+    U["👤 Users · loadgen<br/>http://&lt;alb-hostname&gt;"]:::external
+
+    subgraph AWS["☁️ AWS account (created by controllers)"]
+        ALB["ALB k8s-webplatf-…<br/>health 5s×2 · deregistration 15s"]:::external
+    end
+
+    subgraph KS["📦 Namespace: kube-system (cluster software)"]
+        LBC["Deployment/aws-load-balancer-controller"]:::gateway
+        MS["Deployment/metrics-server<br/>EKS community add-on"]:::observe
+        HPAC["HPA controller<br/>(kube-controller-manager, every 15s)"]:::control
+    end
+
+    subgraph NS["📦 Namespace: web-platform  (pod-readiness-gate-inject: enabled)"]
+        direction TB
+        ING["Ingress/web-platform-ingress<br/>/ → webapp:8080 · target-type ip"]:::gateway
+        SVC["Service/webapp<br/>selects name=webapp"]:::network
+        DEP["Deployment/webapp<br/>no replicas field · maxSurge 1 · maxUnavailable 0"]:::workload
+        RS["ReplicaSet/webapp-&lt;hash&gt;<br/>image webapp-2.0.0"]:::workload
+        P1["Pod/webapp-…<br/>req 100m/128Mi · lim 500m/256Mi<br/>QoS Burstable · preStop sleep 20 · grace 45s"]:::pod
+        P2["Pod/webapp-… (node B)"]:::pod
+        P3["Pod/webapp-… (node C)"]:::pod
+        CM["ConfigMap/webapp-config-&lt;hash&gt;<br/>STARTUP_DELAY_SECONDS=8 · immutable"]:::config
+        HPA["HPA/webapp-hpa<br/>CPU 60% of request · 3 → 12"]:::observe
+        PDB["PDB/webapp-pdb<br/>maxUnavailable 1"]:::observe
+        LR["LimitRange/web-platform-defaults<br/>default 100m/128Mi → 500m/256Mi"]:::security
+        RQ["ResourceQuota/web-platform-quota<br/>requests.cpu 3 · pods 30"]:::security
+        LG["Deployment/loadgen<br/>replicas 0 — scale to apply load"]:::workload
+    end
+
+    U -->|"HTTP :80"| ALB
+    LBC -.->|"reconciles"| ING
+    LBC -->|"registers pod IPs"| ALB
+    ALB -->|"pod IPs"| P1 & P2 & P3
+    SVC --> P1 & P2 & P3
+    DEP --> RS --> P1 & P2 & P3
+    CM -.->|"envFrom"| P1 & P2 & P3
+    LG -->|"http://webapp:8080/api/work"| SVC
+
+    MS -.->|"CPU per pod"| HPAC
+    HPA -.->|"read by"| HPAC
+    HPAC -.->|"sets spec.replicas"| DEP
+    PDB -.->|"limits evictions of"| P1 & P2 & P3
+    LR -.->|"defaults / max at admission"| DEP
+    RQ -.->|"caps the namespace total"| DEP
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef gateway  fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef security fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
+    classDef observe  fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#134e4a
+    classDef control  fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a

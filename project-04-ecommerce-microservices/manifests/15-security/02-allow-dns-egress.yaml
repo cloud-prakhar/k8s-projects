@@ -1,0 +1,45 @@
+# 15-security/02-allow-dns-egress.yaml
+# WHY: THE classic NetworkPolicy mistake. An egress default-deny also blocks
+#      DNS, so every hostname in every service stops resolving at once. The
+#      symptom looks like "all services are down" rather than "a policy is
+#      wrong", which is why it costs people hours.
+#
+# Every pod may send DNS queries — UDP AND TCP 53 (large responses and some
+# resolvers fall back to TCP) — to CoreDNS, and to nothing else.
+#
+# `kubernetes.io/metadata.name` is set by the API server on every namespace;
+# it is how you select a namespace by name without labelling it yourself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-dns-egress
+    app.kubernetes.io/instance: allow-dns-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Allow every pod in the namespace to query CoreDNS in kube-system on port 53"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,dns-egress"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        # ONE list item with BOTH selectors = AND: pods labelled k8s-app=kube-dns
+        # that are ALSO in kube-system. Two separate `- ` items would be OR —
+        # "any pod in kube-system" OR "any kube-dns pod in THIS namespace".
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

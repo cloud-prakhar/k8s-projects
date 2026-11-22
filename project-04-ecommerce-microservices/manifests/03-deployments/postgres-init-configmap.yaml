@@ -1,0 +1,37 @@
+# 03-deployments/postgres-init-configmap.yaml
+# WHY: The postgres image creates exactly ONE database (`POSTGRES_DB`) when its
+#      data directory is first initialised. This project needs two, because
+#      `catalog` and `order` own separate schemas.
+#
+#      Any .sql or .sh file in /docker-entrypoint-initdb.d is executed once, at
+#      FIRST initialisation only. It does not run again on restart, and it does
+#      not run at all if the data directory already has a database in it — which
+#      is exactly the behaviour you want, and also a classic trap: edit this file
+#      after the volume exists (stage 07) and nothing happens.
+#
+# NOTE: this is a ConfigMap used as a FILE, not as environment variables. Stage
+#       05 covers the mechanism properly; it appears here because the database
+#       cannot start correctly without it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres-init
+    app.kubernetes.io/instance: postgres-init
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Creates the second database (orders) at first PostgreSQL initialisation"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "configmap-as-file,docker-entrypoint-initdb"
+data:
+  # The filename becomes the key; the key becomes the filename in the mount.
+  01-create-orders-db.sql: |
+    -- `catalog` already exists: the image created it from POSTGRES_DB.
+    -- `order` owns its own database inside the same server. Separate databases
+    -- mean neither service can accidentally read or migrate the other's tables,
+    -- which keeps the ownership story honest even though they share a server.
+    CREATE DATABASE orders OWNER ecommerce;

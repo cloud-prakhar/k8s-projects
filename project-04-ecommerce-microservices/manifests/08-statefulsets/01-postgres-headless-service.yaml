@@ -1,0 +1,35 @@
+# 08-statefulsets/01-postgres-headless-service.yaml
+# WHY: A StatefulSet REQUIRES a governing Service, named in spec.serviceName, and
+#      it must be HEADLESS (clusterIP: None). Headless means CoreDNS publishes
+#      the individual pod IPs instead of one virtual IP — and, for StatefulSet
+#      pods, a stable per-pod record: postgres-0.postgres-headless.ecommerce.svc.cluster.local
+#
+#      The ordinary ClusterIP Service/postgres from stage 04 stays: clients keep
+#      using the name `postgres`. This one exists for identity, not for clients.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Headless governing Service for StatefulSet/postgres — per-pod DNS"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns"
+spec:
+  clusterIP: None                     # ← headless: no VIP, no kube-proxy rules
+  # Publish pods before they are Ready, so a member's own name resolves during
+  # start-up (replication and init scripts often need it).
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

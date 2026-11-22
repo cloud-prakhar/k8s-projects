@@ -1,0 +1,94 @@
+# 09-ingress/ecommerce-ingress.yaml
+# WHY: Four things must be public — the UI and three APIs — at ONE address,
+#      routed by URL path. A `type: LoadBalancer` Service per backend would be
+#      four NLBs (four hourly bills, four hostnames) and still could not route
+#      `/api/cart` differently from `/`. One Ingress → one ALB does both.
+#
+#      On EKS the AWS Load Balancer Controller watches Ingresses with
+#      `ingressClassName: alb` and builds a real Application Load Balancer:
+#      listener, one rule per path/host, one target group per backend Service.
+#
+# NOT EXPOSED: `payment`. There is no rule for it, so the internet cannot reach
+# it — but an Ingress only controls NORTH-SOUTH traffic. Every pod inside the
+# cluster can still call payment directly. Stage 15 closes that.
+#
+# 💰 An ALB costs ~$0.0225/hour plus usage from the moment this is applied until
+#    it is DELETED. Delete the Ingress BEFORE the controller or the cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-ingress
+    app.kubernetes.io/instance: ecommerce-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Internet-facing ALB: path routing to four services, plus an admin host rule"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingress,alb,path-routing,host-routing"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # Pod IPs are targets (the VPC CNI gives pods real VPC addresses).
+    alb.ingress.kubernetes.io/target-type: ip
+    # The ALB's OWN health check, independent of Kubernetes probes. Every
+    # service answers /healthz.
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=20
+    # ⚠️ WHO MAY CONNECT. deploy.sh and the manual steps replace this with YOUR
+    #    public IP (/32) before anything else happens.
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    alb.ingress.kubernetes.io/tags: project=ecommerce,managed-by=aws-load-balancer-controller
+spec:
+  ingressClassName: alb
+  rules:
+    # --- HOST-based: an admin view of orders, only for Host: admin.shop.local --
+    # We own no DNS, so this rule is exercised with `curl -H 'Host: …'`. It
+    # becomes an ALB rule with a host-header condition — the same ALB, the same
+    # listener, a different routing decision based on a header.
+    - host: admin.shop.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 8080
+    # --- PATH-based: any other Host (including the ALB's own hostname) --------
+    # Each service serves under its own prefix (/api/catalog/…), so the ALB
+    # forwards paths unchanged and no URL rewriting is needed anywhere.
+    - http:
+        paths:
+          - path: /api/catalog
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog
+                port:
+                  number: 8080     # the SERVICE port (== container port here)
+          - path: /api/cart
+            pathType: Prefix
+            backend:
+              service:
+                name: cart
+                port:
+                  number: 8080
+          - path: /api/orders
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: storefront
+                port:
+                  number: 8080

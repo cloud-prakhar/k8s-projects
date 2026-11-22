@@ -1,0 +1,74 @@
+# 03-deployments/catalog-deployment.yaml
+# WHY: The product catalogue. It owns the `catalog` database and is one of only
+#      two services permitted to reach PostgreSQL at all (stage 15).
+#
+#      THE IMPORTANT LINE IN THIS FILE IS NOT A DEPLOYMENT FIELD. It is
+#      `POSTGRES_HOST: "postgres"` — a NAME. That is how every real application
+#      is configured, and nothing in Kubernetes turns a Deployment's name into a
+#      DNS name. Whether that name resolves is the question this stage leaves
+#      open, and the reason stage 04 exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Product catalogue — owns the catalog database"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "deployment,service-discovery-by-name"
+spec:
+  replicas: 2                    # stateless: any replica can serve any request
+  selector:
+    matchLabels:
+      # Minimal and STABLE. `matchLabels` is immutable once the object exists,
+      # so churny data like `version` must never appear here — only in the
+      # pod template's labels below.
+      app.kubernetes.io/name: catalog
+      app.kubernetes.io/instance: catalog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: catalog
+        app.kubernetes.io/instance: catalog
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: catalog
+          image: cloudprakhargupta/ecommerce:catalog-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"            # ← a name. Does anything answer to it?
+            # ⚠️ SET EXPLICITLY, even though 5432 is the app's default. Once a
+            # Service named `postgres` exists, the kubelet injects legacy
+            # "service link" variables into every NEW pod in the namespace —
+            # including POSTGRES_PORT=tcp://10.100.x.x:5432. Leave this unset and
+            # the app reads that string as a port number and every connection
+            # fails. (`enableServiceLinks: false` on the pod turns the injection off.)
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "catalog"             # THIS service's database, not order's
+            - name: POSTGRES_USER
+              value: "ecommerce"
+            - name: POSTGRES_PASSWORD
+              value: "dev-password-not-for-production"   # ⚠️ stage 06 fixes this
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

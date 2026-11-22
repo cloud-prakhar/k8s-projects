@@ -1,0 +1,94 @@
+# 08-statefulsets/02-postgres-statefulset.yaml
+# WHY: A Deployment has ONE pod template naming ONE claim, random pod names, and
+#      no ordering. A database needs the opposite: a stable identity (postgres-0),
+#      its OWN volume that follows that identity across reschedules, and ordered,
+#      one-at-a-time start-up and shutdown.
+#
+# WHAT CHANGED from 07-storage/04-postgres-deployment.yaml:
+#   kind: StatefulSet, serviceName, volumeClaimTemplates (replacing the
+#   stand-alone PVC), and no `strategy` — StatefulSets update one pod at a time,
+#   highest ordinal first, and never run two copies of the same ordinal.
+#
+# ⚠️ The claim template creates a NEW claim, postgres-data-postgres-0, so this
+#    starts on an EMPTY volume. Orders from stage 07 stay on the old claim
+#    (postgres-data) until you delete it. A real migration would pg_dump first.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL holding the catalog and orders databases"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "statefulset,volumeclaimtemplates,stable-identity"
+spec:
+  serviceName: postgres-headless      # MUST name an existing HEADLESS Service
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "ecommerce"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "catalog"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data            # ← matches the claim template's name
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "192Mi"
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+  # One PVC PER POD, named <template>-<statefulset>-<ordinal>:
+  #   postgres-data-postgres-0
+  # Deleting the StatefulSet does NOT delete these — the data outlives the
+  # controller. Cleanup deletes them with the namespace.
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/instance: postgres
+          app.kubernetes.io/part-of: ecommerce
+      spec:
+        storageClassName: ecommerce-gp3
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

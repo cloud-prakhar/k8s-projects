@@ -1,0 +1,35 @@
+# 08-statefulsets/03-redis-headless-service.yaml
+# WHY: A StatefulSet REQUIRES a governing Service, named in spec.serviceName, and
+#      it must be HEADLESS (clusterIP: None). Headless means CoreDNS publishes
+#      the individual pod IPs instead of one virtual IP — and, for StatefulSet
+#      pods, a stable per-pod record: redis-0.redis-headless.ecommerce.svc.cluster.local
+#
+#      The ordinary ClusterIP Service/redis from stage 04 stays: clients keep
+#      using the name `redis`. This one exists for identity, not for clients.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Headless governing Service for StatefulSet/redis — per-pod DNS"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns"
+spec:
+  clusterIP: None                     # ← headless: no VIP, no kube-proxy rules
+  # Publish pods before they are Ready, so a member's own name resolves during
+  # start-up (replication and init scripts often need it).
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

@@ -1,0 +1,38 @@
+# 04-services/catalog-service.yaml
+# WHY: `storefront` is configured with CATALOG_URL=http://catalog:8080 and gets
+#      NXDOMAIN, because a Deployment registers NOTHING in DNS. This Service is
+#      what makes the name `catalog` exist.
+#
+# ⚠️ PORT == TARGETPORT, ON PURPOSE — and it is not a style choice here.
+#    The Amazon VPC CNI network policy engine requires a Service's port to be
+#    the SAME as the container port, and named ports to use the same name in the
+#    Service spec. Map 80 → 8080 the conventional way and stage 15's policies
+#    are enforced against the wrong port, which looks like "my policy randomly
+#    does not work". Every Service in this project therefore publishes the port
+#    its container actually listens on.
+#    Source: https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy.html
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP and DNS name for the catalog service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,dns"
+spec:
+  type: ClusterIP                 # internal only; stage 09 adds the ALB
+  selector:                       # ← MUST match the Deployment's POD TEMPLATE labels
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+  ports:
+    - name: http                  # same NAME as the container port (VPC CNI requirement)
+      port: 8080                  # what clients dial
+      targetPort: http            # the container's NAMED port — resolves to 8080
+      protocol: TCP

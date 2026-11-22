@@ -1,0 +1,36 @@
+# 12-resources/01-limitrange.yaml
+# WHY: Stage 12's fix only protects the pods whose authors remember to set
+#      resources. A LimitRange is the namespace's safety net: it is enforced by
+#      an ADMISSION controller when a pod is created, and
+#        • fills in defaultRequest / default (limit) for any container that
+#          omits them — so nothing in this namespace is BestEffort by accident
+#        • REJECTS a container asking for more than `max`
+#
+# It only acts at creation: existing pods are untouched until they are replaced.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: web-platform-defaults
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-defaults
+    app.kubernetes.io/instance: web-platform-defaults
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Default and maximum resources for every container in the namespace
+    lab.k8s-project/stage: 12-resources
+    lab.k8s-project/teaches: limitrange
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    default:
+      cpu: 500m
+      memory: 256Mi
+    max:
+      cpu: '2'
+      memory: 1Gi

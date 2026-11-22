@@ -1,0 +1,111 @@
+# clusters/eks-advanced.yaml
+# WHY: Projects 04 and 05 both need things `eks-lab.yaml` (Project 03) does not
+#      provide, and neither can be added to a running cluster without a rebuild:
+#
+#        • NETWORK POLICY ENFORCEMENT (Project 04). A NetworkPolicy object is
+#          accepted by any cluster. It is only ENFORCED if the CNI enforces it.
+#          The Amazon VPC CNI ships that support switched OFF; `enableNetworkPolicy`
+#          below turns it on. Without it you can apply a default-deny policy,
+#          watch traffic flow anyway, and learn the wrong lesson.
+#
+#        • THREE NODES (Project 05). PodDisruptionBudgets, `kubectl drain` and
+#          "the node went away" are meaningless on two nodes: drain one of two
+#          and there is nowhere for the pods to go, so you cannot tell a PDB
+#          doing its job from a cluster that is simply full.
+#
+#        • METRICS SERVER (Project 05). An HPA with no metrics source reports
+#          `<unknown>/70%` and never scales. EKS does not install it by default;
+#          it is a community add-on, declared below.
+#
+# ⚠️ THIS COSTS MONEY WHILE IT EXISTS — roughly $0.22/hour (control plane ~$0.10
+#    + 3 × t3.medium ~$0.12), plus ~$0.023/hour per ALB once an Ingress exists.
+#    Delete it the same day:
+#      eksctl delete cluster --config-file clusters/eks-advanced.yaml --disable-nodegroup-eviction
+#    …and read the project's cleanup section FIRST — load balancers and EBS
+#    volumes that Kubernetes created must be deleted THROUGH Kubernetes, or they
+#    are orphaned and keep billing with nothing left that knows they exist.
+#
+# Create (15–20 minutes):
+#   eksctl create cluster --config-file clusters/eks-advanced.yaml
+# Preview without creating anything:
+#   eksctl create cluster --config-file clusters/eks-advanced.yaml --dry-run
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: kubernetes-lab
+  region: us-east-1          # change freely; every command reads it from here
+  version: "1.36"
+  tags:
+    project: kubernetes-project-lab   # find everything this lab created in the console
+
+vpc:
+  nat:
+    # 🧪 LAB SAVING: no NAT gateway (~$0.045/hour + data — the classic surprise
+    # on the bill). Nodes go in PUBLIC subnets instead so they can pull images.
+    # 🏭 Production: private node subnets behind NAT, or VPC endpoints.
+    gateway: Disable
+
+iam:
+  # EKS Pod Identity maps a Kubernetes ServiceAccount to an IAM role through the
+  # EKS API itself — no OIDC provider, no trust-policy editing. The pod receives
+  # temporary credentials from the eks-pod-identity-agent on its node.
+  podIdentityAssociations:
+    - namespace: kube-system
+      serviceAccountName: aws-load-balancer-controller
+      createServiceAccount: true
+      wellKnownPolicies:
+        awsLoadBalancerController: true
+
+addons:
+  - name: vpc-cni
+    # Pod IPs are real VPC addresses, so an ALB can target pods directly.
+    #
+    # ▼ THE LINE PROJECT 04 EXISTS FOR ▼
+    # `enableNetworkPolicy` starts the network-policy agent in the aws-node
+    # DaemonSet and installs the PolicyEndpoint CRD. Leave it out and every
+    # NetworkPolicy in Project 04 is accepted and silently ignored.
+    #
+    # Note the QUOTES: the add-on's configuration schema types this value as a
+    # STRING with boolean format, not a YAML boolean. Unquoted `true` is rejected.
+    #
+    # `resolveConflicts: overwrite` is required whenever configurationValues are
+    # set, because supplying them conflicts with the add-on's default configMap.
+    resolveConflicts: overwrite
+    configurationValues: |-
+      enableNetworkPolicy: "true"
+      nodeAgent:
+        # Log every allow/deny decision the agent makes. This is what turns
+        # "the connection hung" into "policy X denied this flow" in stage 15.
+        enablePolicyEventLogs: "true"
+  - name: coredns
+  - name: kube-proxy
+  - name: eks-pod-identity-agent
+  - name: aws-ebs-csi-driver
+    # Without this, no PersistentVolumeClaim can ever bind and the datastore
+    # StatefulSets sit at 0/1 with their pods Pending.
+    useDefaultPodIdentityAssociations: true
+  - name: metrics-server
+    # A COMMUNITY add-on: the same kubernetes-sigs Metrics Server, packaged and
+    # updated by EKS, needing no IAM role. It feeds `kubectl top` and every HPA.
+    #
+    # On Kind you would install the manifest and add `--kubelet-insecure-tls`,
+    # because Kind's kubelet serving certificates are not signed by the cluster
+    # CA. On EKS they are, so that flag is neither needed nor wanted.
+
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.medium   # 2 vCPU / 4 GiB; the VPC CNI allows 17 pods each
+    # THREE, not two. Project 05 drains a node while a load test runs and asserts
+    # the PodDisruptionBudget keeps a quorum serving. With two nodes that test
+    # cannot distinguish "the PDB protected us" from "there was nowhere to go".
+    desiredCapacity: 3
+    minSize: 3
+    maxSize: 4
+    volumeSize: 20
+    volumeType: gp3
+    privateNetworking: false  # public subnets, because there is no NAT (see above)
+    # eksctl spreads these across the VPC's availability zones, which is what
+    # makes "the EBS volume is in the other AZ" reproducible.
+    labels:
+      lab.k8s-project/pool: general

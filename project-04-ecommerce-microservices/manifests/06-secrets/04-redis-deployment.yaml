@@ -1,0 +1,84 @@
+# 06-secrets/04-redis-deployment.yaml
+# WHAT CHANGED from 03-deployments/redis-deployment.yaml:
+#   The password is no longer on the command line. At start-up a tiny shell
+#   step writes a config file into an in-memory emptyDir (tmpfs) from the
+#   Secret, and redis-server reads THAT file. `ps` now shows
+#   `redis-server /run/redis/redis.conf` — no password.
+#
+# WHY a tmpfs: the rendered file contains the password in clear. `medium: Memory`
+# keeps it off the node's disk, and it disappears with the pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis holding session baskets with a TTL"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secretkeyref,emptydir-memory,no-secrets-in-argv"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "8.2.9"
+    spec:
+      # Overriding `command` bypasses the image's docker-entrypoint.sh, which is
+      # what normally drops from root to the `redis` user. Without this block
+      # Redis would silently run as ROOT. UID 999 / GID 1000 is that user.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          # `exec` replaces the shell, so redis-server is PID 1 and receives
+          # SIGTERM directly on shutdown.
+          command: ["sh", "-c"]
+          args:
+            - |
+              printf 'requirepass %s\nappendonly yes\ndir /data\n' "$REDIS_PASSWORD" > /run/redis/redis.conf
+              exec redis-server /run/redis/redis.conf
+          ports:
+            - name: redis
+              containerPort: 6379
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            # redis-cli reads REDISCLI_AUTH, so probes and `kubectl exec
+            # redis-cli` authenticate without a password on the command line.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: rendered-config
+              mountPath: /run/redis
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+      volumes:
+        - name: rendered-config
+          emptyDir:
+            medium: Memory       # tmpfs: never written to the node's disk
+            sizeLimit: 1Mi

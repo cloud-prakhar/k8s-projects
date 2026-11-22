@@ -1,0 +1,75 @@
+# 07-storage/04-postgres-deployment.yaml
+# WHAT CHANGED from 06-secrets/03-postgres-deployment.yaml:
+#   * the data directory is now a PersistentVolumeClaim (an EBS volume)
+#   * strategy: Recreate — an EBS volume attaches to ONE EC2 instance at a time.
+#     A RollingUpdate would start the new pod (maybe on another node) before the
+#     old one released the volume, and wait forever on `Multi-Attach error`.
+#   PGDATA was already a subdirectory of the mount (stage 03), so initdb does
+#   not trip over the fresh filesystem's lost+found.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL holding the catalog and orders databases"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "pvc,recreate-strategy"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "17.5"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.5-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "ecommerce"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "catalog"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "192Mi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: init
+          configMap:
+            name: postgres-init

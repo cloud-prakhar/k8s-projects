@@ -1,0 +1,45 @@
+# 19-final/kustomization.yaml
+# WHY: Stage 05 left one trap armed: `ecommerce-config` is MUTABLE. Edit it and
+#      nothing happens — until pods restart one by one over the following days
+#      and the fleet silently splits between old and new values.
+#
+#      A configMapGenerator removes the trap. It builds the ConfigMap from
+#      config/ecommerce.env, appends a HASH OF THE CONTENT to the name
+#      (ecommerce-config-7g2h9kc5bt), marks it immutable, and rewrites every
+#      reference — envFrom in all five Deployments AND in both init containers —
+#      to that exact name. Change one byte → new name → new pod templates → a
+#      real, revisioned rollout.
+#
+# Preview (ALWAYS, before applying):  kubectl kustomize manifests/19-final/
+# Apply:                              kubectl apply -k manifests/19-final/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Every object already names its namespace; setting `namespace:` here would also
+# be fine for this single-namespace project, but explicit is clearer.
+resources:
+  - complete-production-manifest.yaml
+
+generatorOptions:
+  immutable: true
+
+configMapGenerator:
+  - name: ecommerce-config
+    namespace: ecommerce
+    envs:
+      - config/ecommerce.env
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false     # ⚠️ NEVER true: it would rewrite immutable selectors
+
+# Retarget images here, never in the manifest. ECR instead of Docker Hub:
+#   newName: <account>.dkr.ecr.<region>.amazonaws.com/ecommerce
+images:
+  - name: cloudprakhargupta/ecommerce
+    newName: cloudprakhargupta/ecommerce
+  - name: postgres
+    newTag: "17.5-alpine"
+  - name: redis
+    newTag: "8.2.9-alpine"

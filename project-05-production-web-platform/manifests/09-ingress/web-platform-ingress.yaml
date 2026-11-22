@@ -1,0 +1,51 @@
+# 09-ingress/web-platform-ingress.yaml
+# WHY: Rollouts, drains and autoscaling only matter if REAL traffic is flowing
+#      through a REAL load balancer while they happen. `port-forward` pins you to
+#      one pod and would hide every failure this project is about.
+#
+# Two annotations are part of the lesson, not boilerplate:
+#   deregistration_delay 15s  — how long the ALB keeps sending in-flight
+#                               requests to a target it is removing. Stage 11's
+#                               preStop hook must outlast the time it takes the
+#                               ALB to STOP sending new ones.
+#   healthcheck 5s × 2        — how fast the ALB notices a target is down.
+#
+# 💰 ~$0.0225/hour from creation until the Ingress is DELETED. inbound-cidrs is
+#    replaced with your IP by deploy.sh and the manual steps.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-platform-ingress
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-ingress
+    app.kubernetes.io/instance: web-platform-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Internet-facing ALB in front of the web app
+    lab.k8s-project/stage: 09-ingress
+    lab.k8s-project/teaches: ingress,alb,target-type-ip,deregistration-delay
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '5'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '3'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=15
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    alb.ingress.kubernetes.io/tags: project=web-platform,managed-by=aws-load-balancer-controller
+spec:
+  ingressClassName: alb
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp
+            port:
+              number: 8080

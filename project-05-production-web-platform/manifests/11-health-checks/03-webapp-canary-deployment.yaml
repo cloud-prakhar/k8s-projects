@@ -1,0 +1,81 @@
+# 11-health-checks/03-webapp-canary-deployment.yaml
+# CANARY, with nothing but labels. One pod of a new version runs NEXT TO the
+# stable Deployment. Both carry app.kubernetes.io/name=webapp, so a Service
+# selecting on the NAME alone sends each a share of traffic proportional to pod
+# count (1 of 4 ≈ 25%). The two Deployments select on different INSTANCES, so
+# they never fight over each other's pods.
+#
+# Promote: roll the stable Deployment to the new image, delete this one.
+# Abort:   delete this one. Either way, one command.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-canary
+  namespace: web-platform
+  labels: &id001
+    app.kubernetes.io/name: webapp
+    app.kubernetes.io/instance: webapp-canary
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 2.0.0
+  annotations:
+    kubernetes.io/description: 'Canary: one pod of the new version behind the same Service'
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: canary,labels-and-selectors
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webapp
+      app.kubernetes.io/instance: webapp-canary
+  template:
+    metadata:
+      labels: *id001
+    spec:
+      containers:
+      - name: webapp
+        image: cloudprakhargupta/web-platform:webapp-2.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: webapp-config
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 2
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 20
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+      terminationGracePeriodSeconds: 45

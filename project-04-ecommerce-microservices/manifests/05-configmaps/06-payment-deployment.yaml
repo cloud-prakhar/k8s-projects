@@ -1,0 +1,62 @@
+# 05-configmaps/06-payment-deployment.yaml
+# WHAT CHANGED from 03-deployments/payment-deployment.yaml:
+#   PAYMENT_LATENCY_MS and PAYMENT_FAIL_RATE now come from the ConfigMap.
+#
+# WHY THAT MATTERS LATER: those two dials are how stage 11 and the failure labs
+# produce a cascading failure on demand. Having them in a ConfigMap means one
+# `kubectl patch` + `kubectl rollout restart` turns the whole shop slow — no
+# manifest editing, no image rebuild.
+#
+# ⚠️ Editing a ConfigMap does NOT restart anything. Environment variables are
+#    read once, at container start. Change a value and the running pods keep the
+#    old one until something replaces them — which is why every config change in
+#    this project is followed by an explicit `kubectl rollout restart`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: payment
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Payment authorisation — reachable only by the order service (from stage 15)"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "envfrom,configmap,env-read-once"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+      app.kubernetes.io/instance: payment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/instance: payment
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: payment
+          image: cloudprakhargupta/ecommerce:payment-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

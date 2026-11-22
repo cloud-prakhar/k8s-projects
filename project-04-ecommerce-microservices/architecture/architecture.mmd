@@ -1,0 +1,134 @@
+%% Project 04 — E-Commerce Microservices on EKS, Low-Level Design
+%% Every Kubernetes object the project creates in its FINAL state (stage 19),
+%% plus the AWS resources the controllers create from them.
+%% Source for the diagram in README.md §7.
+%%
+%% Render:  mmdc -i architecture.mmd -o architecture.png
+%% Palette: docs/CONVENTIONS.md §6.1 — the same colours mean the same layers in
+%%          all ten projects.
+flowchart TB
+    U["👤 Shopper<br/>http://&lt;alb-hostname&gt;"]:::external
+
+    subgraph AWS["☁️ AWS account (created by controllers)"]
+        ALB["ALB k8s-ecommerce-…<br/>listener :80 · host + path rules"]:::external
+        EBS["EBS vol-… gp3<br/>one per PVC"]:::storage
+    end
+
+    subgraph KS["📦 Namespace: kube-system (cluster software)"]
+        LBC["Deployment/aws-load-balancer-controller<br/>Pod Identity → IAM"]:::gateway
+        CSI["Deployment/ebs-csi-controller<br/>Pod Identity → IAM"]:::storage
+        DNS["Deployment/coredns<br/>Service kube-dns 10.100.0.10"]:::network
+        CNI["DaemonSet/aws-node<br/>VPC CNI + network policy agent<br/>enableNetworkPolicy: true"]:::security
+    end
+
+    ICLASS["IngressClass/alb"]:::gateway
+    SC["StorageClass/ecommerce-gp3<br/>ebs.csi.aws.com · WaitForFirstConsumer"]:::storage
+
+    subgraph NS["📦 Namespace: ecommerce  (pod-readiness-gate-inject: enabled)"]
+        direction TB
+
+        ING["Ingress/ecommerce-ingress<br/>/ → storefront · /api/catalog · /api/cart · /api/orders<br/>Host admin.shop.local → order"]:::gateway
+
+        SVCSF["Service/storefront<br/>ClusterIP :8080"]:::network
+        DEPSF["Deployment/storefront<br/>replicas 2"]:::workload
+        PSF["Pod/storefront-…<br/>readiness: shallow"]:::pod
+
+        SVCCAT["Service/catalog<br/>ClusterIP :8080"]:::network
+        DEPCAT["Deployment/catalog<br/>replicas 2"]:::workload
+        PCAT["Pod/catalog-…<br/>init: migrate"]:::pod
+
+        SVCCART["Service/cart<br/>ClusterIP :8080"]:::network
+        DEPCART["Deployment/cart<br/>replicas 2"]:::workload
+        PCART["Pod/cart-…"]:::pod
+
+        SVCORD["Service/order<br/>ClusterIP :8080"]:::network
+        DEPORD["Deployment/order<br/>replicas 2"]:::workload
+        PORD["Pod/order-…<br/>init: migrate"]:::pod
+
+        SVCPAY["Service/payment<br/>ClusterIP :8080"]:::network
+        DEPPAY["Deployment/payment<br/>replicas 2"]:::workload
+        PPAY["Pod/payment-…"]:::pod
+
+        SVCPG["Service/postgres<br/>ClusterIP :5432"]:::network
+        SVCPGH["Service/postgres-headless<br/>clusterIP None"]:::network
+        STSPG["StatefulSet/postgres<br/>replicas 1 · db: catalog + orders"]:::workload
+        PPG["Pod/postgres-0<br/>exec pg_isready"]:::pod
+        PVCPG["PVC/postgres-data-postgres-0"]:::storage
+
+        SVCRD["Service/redis<br/>ClusterIP :6379"]:::network
+        SVCRDH["Service/redis-headless<br/>clusterIP None"]:::network
+        STSRD["StatefulSet/redis<br/>replicas 1"]:::workload
+        PRD["Pod/redis-0"]:::pod
+        PVCRD["PVC/redis-data-redis-0"]:::storage
+
+        CM["ConfigMap/ecommerce-config-&lt;hash&gt;<br/>immutable · generated"]:::config
+        SECP["Secret/postgres-secret"]:::config
+        SECR["Secret/redis-secret"]:::config
+
+        subgraph NP["🔒 NetworkPolicies (stage 15)"]
+            NP0["default-deny-all<br/>ingress + egress"]:::security
+            NP1["allow-dns-egress<br/>UDP/TCP 53 → kube-system"]:::security
+            NP2["allow-internet-to-public-services<br/>:8080 to the 4 ALB-exposed services"]:::security
+            NP3["allow-*-egress ×4<br/>each service → exactly its upstreams"]:::security
+            NP4["allow-order-to-payment"]:::security
+            NP5["allow-apps-to-postgres<br/>catalog + order only"]:::security
+            NP6["allow-cart-to-redis<br/>cart only"]:::security
+        end
+    end
+
+    U -->|"HTTP :80"| ALB
+    ING -.->|"ingressClassName"| ICLASS
+    LBC -.->|"reconciles"| ING
+    LBC -->|"creates + registers pod IPs"| ALB
+    ALB -->|"/"| PSF
+    ALB -->|"/api/catalog"| PCAT
+    ALB -->|"/api/cart"| PCART
+    ALB -->|"/api/orders"| PORD
+
+    SVCSF --> PSF
+    DEPSF --> PSF
+    SVCCAT --> PCAT
+    DEPCAT --> PCAT
+    SVCCART --> PCART
+    DEPCART --> PCART
+    SVCORD --> PORD
+    DEPORD --> PORD
+    SVCPAY --> PPAY
+    DEPPAY --> PPAY
+
+    PSF -->|"east-west"| SVCCAT & SVCCART & SVCORD
+    PORD -->|"the ONLY caller"| SVCPAY
+    PCAT -->|"SQL db=catalog"| SVCPG
+    PORD -->|"SQL db=orders"| SVCPG
+    SVCPG --> PPG
+    SVCPGH -.-> PPG
+    STSPG --> PPG --> PVCPG
+    PCART -->|":6379"| SVCRD --> PRD
+    SVCRDH -.-> PRD
+    STSRD --> PRD --> PVCRD
+
+    PSF & PCAT & PCART & PORD & PPAY -.->|"resolve every name"| DNS
+
+    CM -.->|"envFrom"| PSF & PCAT & PCART & PORD & PPAY
+    SECP -.-> PCAT & PORD & PPG
+    SECR -.-> PCART & PRD
+
+    SC -.->|"provisions via"| CSI
+    CSI -->|"CreateVolume"| EBS
+    PVCPG & PVCRD -.-> EBS
+
+    CNI -.->|"ENFORCES every policy below"| NP
+    NP0 -.->|"denies everything first"| PSF
+    NP1 -.->|"without this, every name fails"| DNS
+    NP4 -.->|"guards"| PPAY
+    NP5 -.->|"guards"| PPG
+    NP6 -.->|"guards"| PRD
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef gateway  fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef network  fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef workload fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef pod      fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef config   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef storage  fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81
+    classDef security fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d

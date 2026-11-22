@@ -1,0 +1,363 @@
+# 19-final/complete-production-manifest.yaml
+# ---------------------------------------------------------------------------
+# THE COMPLETE DESIRED STATE of Project 05, plus the ConfigMap that
+# kustomization.yaml GENERATES from config/webapp.env.
+#
+# ⚠️ Apply through Kustomize:  kubectl apply -k manifests/19-final/
+#
+# Final versions from each stage: namespace with readiness gates (11), Service
+# with the application-level selector (11), LimitRange + ResourceQuota (12),
+# Deployment with probes, preStop, grace period, resources, anti-affinity and
+# NO replicas field (11–14), HPA (13), PDB (14), loadgen at 0 (13), Ingress (09).
+#
+# ABSENT (teaching artifacts): the canary and blue/green demos, the mutable
+# webapp-config.
+#
+# PREREQUISITES — clusters/eks-advanced.yaml: the metrics-server add-on (or the
+# HPA shows <unknown>), and the AWS Load Balancer Controller (or no ALB).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform
+    app.kubernetes.io/instance: web-platform
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+    app.kubernetes.io/managed-by: kubectl
+    elbv2.k8s.aws/pod-readiness-gate-inject: enabled
+  annotations:
+    kubernetes.io/description: "Production web platform \u2014 one traffic-serving app, made observable under load"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: namespace,alb-readiness-gate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: webapp
+    app.kubernetes.io/instance: webapp
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Stable name and ClusterIP for the web app
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: selector-asymmetry,canary
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: webapp
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: web-platform-defaults
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-defaults
+    app.kubernetes.io/instance: web-platform-defaults
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Default and maximum resources for every container in the namespace
+    lab.k8s-project/stage: 12-resources
+    lab.k8s-project/teaches: limitrange
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    default:
+      cpu: 500m
+      memory: 256Mi
+    max:
+      cpu: '2'
+      memory: 1Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: web-platform-quota
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-quota
+    app.kubernetes.io/instance: web-platform-quota
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Upper bound on what the whole namespace may request
+    lab.k8s-project/stage: 12-resources
+    lab.k8s-project/teaches: resourcequota
+spec:
+  hard:
+    requests.cpu: '3'
+    requests.memory: 3Gi
+    limits.cpu: '8'
+    limits.memory: 6Gi
+    pods: '30'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: web-platform
+  labels: &id001
+    app.kubernetes.io/name: webapp
+    app.kubernetes.io/instance: webapp
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 2.0.0
+  annotations:
+    kubernetes.io/description: "The web application \u2014 final state"
+    lab.k8s-project/stage: 19-final
+    lab.k8s-project/teaches: final-state
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webapp
+      app.kubernetes.io/instance: webapp
+  template:
+    metadata:
+      labels: *id001
+    spec:
+      containers:
+      - name: webapp
+        image: cloudprakhargupta/web-platform:webapp-2.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: webapp-config
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 2
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 20
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+      terminationGracePeriodSeconds: 45
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: webapp
+                  app.kubernetes.io/instance: webapp
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webapp-hpa
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: webapp-hpa
+    app.kubernetes.io/instance: webapp-hpa
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Scale the web app on CPU utilisation relative to its request
+    lab.k8s-project/stage: 13-hpa
+    lab.k8s-project/teaches: hpa,autoscaling-v2,behavior
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webapp
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      selectPolicy: Min
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 30
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webapp-pdb
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: webapp-pdb
+    app.kubernetes.io/instance: webapp-pdb
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Never let voluntary disruptions take more than one webapp pod at a time
+    lab.k8s-project/stage: 14-pdb
+    lab.k8s-project/teaches: pdb,eviction,drain
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webapp
+      app.kubernetes.io/instance: webapp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: loadgen
+    app.kubernetes.io/instance: loadgen
+    app.kubernetes.io/component: job
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "In-cluster load generator \u2014 scale it to apply load"
+    lab.k8s-project/stage: 13-hpa
+    lab.k8s-project/teaches: load-testing
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadgen
+      app.kubernetes.io/instance: loadgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen
+        app.kubernetes.io/instance: loadgen
+        app.kubernetes.io/component: job
+        app.kubernetes.io/part-of: web-platform
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: loadgen
+        image: cloudprakhargupta/web-platform:loadgen-1.0.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --url
+        - http://webapp:8080/api/work?ms=80
+        - --concurrency
+        - '16'
+        - --duration
+        - '3600'
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-platform-ingress
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform-ingress
+    app.kubernetes.io/instance: web-platform-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Internet-facing ALB in front of the web app
+    lab.k8s-project/stage: 09-ingress
+    lab.k8s-project/teaches: ingress,alb,target-type-ip,deregistration-delay
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '5'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '3'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=15
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    alb.ingress.kubernetes.io/tags: project=web-platform,managed-by=aws-load-balancer-controller
+spec:
+  ingressClassName: alb
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp
+            port:
+              number: 8080

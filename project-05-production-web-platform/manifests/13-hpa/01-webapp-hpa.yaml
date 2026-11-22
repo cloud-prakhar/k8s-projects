@@ -1,0 +1,64 @@
+# 13-hpa/01-webapp-hpa.yaml
+# WHY: Load varies; a fixed replica count is either wasted money at night or an
+#      outage at peak. The HPA controller, every 15s, asks Metrics Server for
+#      each pod's CPU usage, divides by the pod's CPU REQUEST, averages, and
+#      computes:
+#
+#          desired = ceil( current × currentUtilisation / target )
+#
+#      e.g. 3 pods at 180% of a 60% target → ceil(3 × 180/60) = 9 pods.
+#
+# `averageUtilization: 60` is a percentage OF THE REQUEST (100m). No request,
+# no percentage — the HPA reports <unknown> and never scales (a failure lab).
+#
+# behavior: scale UP fast (double, or +2 pods, every 30s — whichever is more),
+# scale DOWN slowly (1 pod per 30s, after 2 minutes of lower recommendations).
+# Asymmetric on purpose: under-provisioning costs users; over-provisioning
+# costs a few minutes of EC2.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webapp-hpa
+  namespace: web-platform
+  labels:
+    app.kubernetes.io/name: webapp-hpa
+    app.kubernetes.io/instance: webapp-hpa
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: Scale the web app on CPU utilisation relative to its request
+    lab.k8s-project/stage: 13-hpa
+    lab.k8s-project/teaches: hpa,autoscaling-v2,behavior
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webapp
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      selectPolicy: Min
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 30

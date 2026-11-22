@@ -1,0 +1,18 @@
+# 00-namespace/namespace.yaml
+# WHY: This project deliberately runs a workload hot — CPU burns, held memory,
+#      load tests, node drains. A namespace of its own is the scope for all of
+#      that, and the unit a ResourceQuota and LimitRange attach to in stage 12.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web-platform
+  labels:
+    app.kubernetes.io/name: web-platform
+    app.kubernetes.io/instance: web-platform
+    app.kubernetes.io/part-of: web-platform
+    app.kubernetes.io/version: 1.0.0
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    kubernetes.io/description: "Production web platform \u2014 one traffic-serving app, made observable under load"
+    lab.k8s-project/stage: 00-namespace
+    lab.k8s-project/teaches: namespace

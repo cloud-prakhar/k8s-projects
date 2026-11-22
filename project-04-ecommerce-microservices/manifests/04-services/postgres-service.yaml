@@ -1,0 +1,37 @@
+# 04-services/postgres-service.yaml
+# WHY: `catalog` and `order` are both configured with POSTGRES_HOST=postgres and
+#      are both failing to resolve it. One Service, two clients, two different
+#      DATABASES inside it — the host is shared, the data is not.
+#
+# 🔴 Like `payment`, creating this Service makes PostgreSQL reachable by name
+#    from EVERY pod in the cluster. Any compromised container can try the
+#    password. Stage 15's `allow-apps-to-postgres` narrows that to exactly two
+#    services.
+#
+# ⚠️ port == targetPort (5432): required by the VPC CNI network policy engine
+#    (see catalog-service.yaml for the full explanation and the source).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "ClusterIP for PostgreSQL — used by catalog and order, each with its own database"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,dns,shared-datastore"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres        # the container's named port
+      protocol: TCP

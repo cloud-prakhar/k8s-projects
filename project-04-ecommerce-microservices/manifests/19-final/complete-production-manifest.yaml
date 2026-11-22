@@ -1,0 +1,1424 @@
+# 19-final/complete-production-manifest.yaml
+# ---------------------------------------------------------------------------
+# THE COMPLETE DESIRED STATE of Project 04, in one file — plus the ConfigMap
+# that kustomization.yaml GENERATES from config/ecommerce.env.
+#
+# ⚠️ Apply it through Kustomize:  kubectl apply -k manifests/19-final/
+#    Applied with -f alone, every Deployment references `ecommerce-config`,
+#    which does not exist, and pods sit in CreateContainerConfigError.
+#
+# Every object below is the FINAL version from its teaching stage, copied
+# verbatim by a script — so this file cannot drift from the stages:
+#   namespace (11) · StorageClass (07) · Secrets (06) · postgres-init (03)
+#   Services (04, 08) · StatefulSets (11) · Deployments (11) · Ingress (09)
+#   NetworkPolicies (15)
+#
+# DELIBERATELY ABSENT (teaching artifacts): the hand-written mutable
+# ecommerce-config, the stand-alone postgres-data / redis-data PVCs, and the
+# Deployment versions of both datastores.
+#
+# PREREQUISITES (cluster software, not this application) — clusters/eks-advanced.yaml:
+#   • VPC CNI with enableNetworkPolicy: "true"  — or the policies do nothing
+#   • aws-ebs-csi-driver                         — or no PVC ever binds
+#   • AWS Load Balancer Controller + IngressClass alb — or no ALB appears
+# ---------------------------------------------------------------------------
+# --- Namespace -----------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce
+    app.kubernetes.io/instance: ecommerce
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+    elbv2.k8s.aws/pod-readiness-gate-inject: enabled
+  annotations:
+    kubernetes.io/description: "E-commerce microservices — storefront, catalog, cart, order, payment, PostgreSQL and Redis"
+    lab.k8s-project/stage: "11-health-checks"
+    lab.k8s-project/teaches: "namespace,alb-readiness-gate"
+---
+# --- Storage (cluster-scoped) ----------------------------------------------
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ecommerce-gp3
+  labels:
+    app.kubernetes.io/name: ecommerce-gp3
+    app.kubernetes.io/instance: ecommerce-gp3
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Encrypted gp3 EBS volumes for the shop's datastores"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "storageclass,ebs-csi,waitforfirstconsumer"
+provisioner: ebs.csi.aws.com          # the EBS CSI driver add-on
+parameters:
+  type: gp3
+  encrypted: "true"                   # parameters are strings — quote them
+reclaimPolicy: Delete                 # 🧪 lab: deleting the claim deletes the EBS volume
+# Create the volume only once a pod needs it, IN THAT POD'S AZ. EBS is zonal:
+# `Immediate` would pick an AZ at random and could strand the pod.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# --- Secrets — 🧪 in Git for the lab only -----------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres-secret
+    app.kubernetes.io/instance: postgres-secret
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "PostgreSQL password — shared by postgres, catalog and order"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secret,secretkeyref,base64-is-not-encryption"
+type: Opaque
+# stringData: you write plain text; the API server base64-encodes it into `data`.
+stringData:
+  POSTGRES_PASSWORD: "dev-password-not-for-production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis-secret
+    app.kubernetes.io/instance: redis-secret
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis password — shared by redis and cart"
+    lab.k8s-project/stage: "06-secrets"
+    lab.k8s-project/teaches: "secret,secretkeyref"
+type: Opaque
+stringData:
+  REDIS_PASSWORD: "dev-redis-password-not-for-production"
+---
+# --- PostgreSQL init script (runs once, at first initdb) -------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres-init
+    app.kubernetes.io/instance: postgres-init
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "Creates the second database (orders) at first PostgreSQL initialisation"
+    lab.k8s-project/stage: "03-deployments"
+    lab.k8s-project/teaches: "configmap-as-file,docker-entrypoint-initdb"
+data:
+  # The filename becomes the key; the key becomes the filename in the mount.
+  01-create-orders-db.sql: |
+    -- `catalog` already exists: the image created it from POSTGRES_DB.
+    -- `order` owns its own database inside the same server. Separate databases
+    -- mean neither service can accidentally read or migrate the other's tables,
+    -- which keeps the ownership story honest even though they share a server.
+    CREATE DATABASE orders OWNER ecommerce;
+---
+# --- Services (ClusterIP, stage 04) ----------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: storefront
+    app.kubernetes.io/instance: storefront
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP for the shop UI; the ALB's default backend"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,dns"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: storefront
+    app.kubernetes.io/instance: storefront
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP and DNS name for the catalog service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,dns"
+spec:
+  type: ClusterIP                 # internal only; stage 09 adds the ALB
+  selector:                       # ← MUST match the Deployment's POD TEMPLATE labels
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+  ports:
+    - name: http                  # same NAME as the container port (VPC CNI requirement)
+      port: 8080                  # what clients dial
+      targetPort: http            # the container's NAMED port — resolves to 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: cart
+    app.kubernetes.io/instance: cart
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP and DNS name for the cart service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,dns"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cart
+    app.kubernetes.io/instance: cart
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: order
+    app.kubernetes.io/instance: order
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Stable ClusterIP and DNS name for the order service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,selectors,endpointslice,dns"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: order
+    app.kubernetes.io/instance: order
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: payment
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "ClusterIP for the payment service — reachable by every pod until stage 15 restricts it"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,service-is-not-access-control"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: payment
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "17.5"
+  annotations:
+    kubernetes.io/description: "ClusterIP for PostgreSQL — used by catalog and order, each with its own database"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,dns,shared-datastore"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres        # the container's named port
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "ClusterIP for Redis — used only by the cart service"
+    lab.k8s-project/stage: "04-services"
+    lab.k8s-project/teaches: "clusterip,dns,single-client-datastore"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+# --- Headless governing Services (stage 08) --------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Headless governing Service for StatefulSet/postgres — per-pod DNS"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns"
+spec:
+  clusterIP: None                     # ← headless: no VIP, no kube-proxy rules
+  # Publish pods before they are Ready, so a member's own name resolves during
+  # start-up (replication and init scripts often need it).
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Headless governing Service for StatefulSet/redis — per-pod DNS"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "headless-service,per-pod-dns"
+spec:
+  clusterIP: None                     # ← headless: no VIP, no kube-proxy rules
+  # Publish pods before they are Ready, so a member's own name resolves during
+  # start-up (replication and init scripts often need it).
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+# --- Datastores (StatefulSets with probes, stage 11) -----------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: '17.5'
+  annotations:
+    kubernetes.io/description: PostgreSQL holding the catalog and orders databases
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: exec-probes,startup-probe
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: '17.5'
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:17.5-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: postgres
+          containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: ecommerce
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          value: catalog
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            cpu: 100m
+            memory: 192Mi
+        startupProbe:
+          exec: &id001
+            command:
+            - sh
+            - -c
+            - pg_isready -h 127.0.0.1 -U ecommerce -d catalog
+          periodSeconds: 2
+          failureThreshold: 60
+        readinessProbe:
+          exec: *id001
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          exec: *id001
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+      volumes:
+      - name: init
+        configMap:
+          name: postgres-init
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: postgres
+        app.kubernetes.io/part-of: ecommerce
+    spec:
+      storageClassName: ecommerce-gp3
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 8.2.9
+  annotations:
+    kubernetes.io/description: Redis holding session baskets with a TTL
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: exec-probes
+spec:
+  serviceName: redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 8.2.9
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: redis
+        image: redis:8.2.9-alpine
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        args:
+        - |
+          printf 'requirepass %s\nappendonly yes\ndir /data\n' "$REDIS_PASSWORD" > /run/redis/redis.conf
+          exec redis-server /run/redis/redis.conf
+        ports:
+        - name: redis
+          containerPort: 6379
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: REDISCLI_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        - name: rendered-config
+          mountPath: /run/redis
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+        startupProbe:
+          exec: &id001
+            command:
+            - sh
+            - -c
+            - redis-cli ping | grep -q PONG
+          periodSeconds: 2
+          failureThreshold: 30
+        readinessProbe:
+          exec: *id001
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          exec: *id001
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 6
+      volumes:
+      - name: rendered-config
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/part-of: ecommerce
+    spec:
+      storageClassName: ecommerce-gp3
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+# --- Application services (stage 11) ---------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: storefront
+    app.kubernetes.io/instance: storefront
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "Shop UI \u2014 fans out to catalog, cart and order"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: probes,rolling-update,readiness-gate
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: storefront
+      app.kubernetes.io/instance: storefront
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: storefront
+        app.kubernetes.io/instance: storefront
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: storefront
+        image: cloudprakhargupta/ecommerce:storefront-1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/instance: catalog
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "Product catalogue \u2014 owns the catalog database"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: probes,rolling-update,readiness-gate,init-container
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: catalog
+      app.kubernetes.io/instance: catalog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: catalog
+        app.kubernetes.io/instance: catalog
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: catalog
+        image: cloudprakhargupta/ecommerce:catalog-1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: RUN_MIGRATIONS
+          value: 'false'
+        - name: POSTGRES_DB
+          value: catalog
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+      initContainers:
+      - name: migrate
+        image: cloudprakhargupta/ecommerce:catalog-1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - migrate.py
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: POSTGRES_DB
+          value: catalog
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: cart
+    app.kubernetes.io/instance: cart
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "Session baskets in Redis \u2014 the only service permitted to reach Redis"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: probes,rolling-update,readiness-gate
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cart
+      app.kubernetes.io/instance: cart
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cart
+        app.kubernetes.io/instance: cart
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: cart
+        image: cloudprakhargupta/ecommerce:cart-1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: order
+    app.kubernetes.io/instance: order
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "Checkout \u2014 owns the orders database and is the only caller of payment"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: probes,rolling-update,readiness-gate,init-container
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order
+      app.kubernetes.io/instance: order
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order
+        app.kubernetes.io/instance: order
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: order
+        image: cloudprakhargupta/ecommerce:order-1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: RUN_MIGRATIONS
+          value: 'false'
+        - name: POSTGRES_DB
+          value: orders
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+      initContainers:
+      - name: migrate
+        image: cloudprakhargupta/ecommerce:order-1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - migrate.py
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: POSTGRES_DB
+          value: orders
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: payment
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: 1.0.0
+  annotations:
+    kubernetes.io/description: "Payment authorisation \u2014 reachable only by the order service (from stage 15)"
+    lab.k8s-project/stage: 11-health-checks
+    lab.k8s-project/teaches: probes,rolling-update,readiness-gate
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+      app.kubernetes.io/instance: payment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/instance: payment
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      containers:
+      - name: payment
+        image: cloudprakhargupta/ecommerce:payment-1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+---
+# --- Ingress → ALB (stage 09) ----------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-ingress
+    app.kubernetes.io/instance: ecommerce-ingress
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Internet-facing ALB: path routing to four services, plus an admin host rule"
+    lab.k8s-project/stage: "09-ingress"
+    lab.k8s-project/teaches: "ingress,alb,path-routing,host-routing"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # Pod IPs are targets (the VPC CNI gives pods real VPC addresses).
+    alb.ingress.kubernetes.io/target-type: ip
+    # The ALB's OWN health check, independent of Kubernetes probes. Every
+    # service answers /healthz.
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=20
+    # ⚠️ WHO MAY CONNECT. deploy.sh and the manual steps replace this with YOUR
+    #    public IP (/32) before anything else happens.
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+    alb.ingress.kubernetes.io/tags: project=ecommerce,managed-by=aws-load-balancer-controller
+spec:
+  ingressClassName: alb
+  rules:
+    # --- HOST-based: an admin view of orders, only for Host: admin.shop.local --
+    # We own no DNS, so this rule is exercised with `curl -H 'Host: …'`. It
+    # becomes an ALB rule with a host-header condition — the same ALB, the same
+    # listener, a different routing decision based on a header.
+    - host: admin.shop.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 8080
+    # --- PATH-based: any other Host (including the ALB's own hostname) --------
+    # Each service serves under its own prefix (/api/catalog/…), so the ALB
+    # forwards paths unchanged and no URL rewriting is needed anywhere.
+    - http:
+        paths:
+          - path: /api/catalog
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog
+                port:
+                  number: 8080     # the SERVICE port (== container port here)
+          - path: /api/cart
+            pathType: Prefix
+            backend:
+              service:
+                name: cart
+                port:
+                  number: 8080
+          - path: /api/orders
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: storefront
+                port:
+                  number: 8080
+---
+# --- NetworkPolicies (stage 15) --------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: default-deny-all
+    app.kubernetes.io/instance: default-deny-all
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Isolate every pod in the namespace for ingress and egress; allow rules follow"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,default-deny"
+spec:
+  podSelector: {}            # every pod in `ecommerce`
+  policyTypes:
+    - Ingress
+    - Egress
+  # no ingress:/egress: rules at all ⇒ nothing is allowed in either direction
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-dns-egress
+    app.kubernetes.io/instance: allow-dns-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Allow every pod in the namespace to query CoreDNS in kube-system on port 53"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,dns-egress"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        # ONE list item with BOTH selectors = AND: pods labelled k8s-app=kube-dns
+        # that are ALSO in kube-system. Two separate `- ` items would be OR —
+        # "any pod in kube-system" OR "any kube-dns pod in THIS namespace".
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-to-public-services
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-internet-to-public-services
+    app.kubernetes.io/instance: allow-internet-to-public-services
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Admit port 8080 to the four ALB-exposed services from any source"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,ipblock"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [storefront, catalog, cart, order]     # NOT payment
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-storefront-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-storefront-egress
+    app.kubernetes.io/instance: allow-storefront-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "storefront may call catalog, cart and order on 8080 — and nothing else"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,egress"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: storefront
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: catalog
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cart
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-order-egress
+    app.kubernetes.io/instance: allow-order-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "order may call payment on 8080 and PostgreSQL on 5432"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,egress"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: order
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-catalog-egress
+    app.kubernetes.io/instance: allow-catalog-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "catalog may reach PostgreSQL on 5432"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,egress"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: catalog
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cart-egress
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-cart-egress
+    app.kubernetes.io/instance: allow-cart-egress
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "cart may reach Redis on 6379"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,egress"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cart
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-to-payment
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-order-to-payment
+    app.kubernetes.io/instance: allow-order-to-payment
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "payment accepts connections from order pods only"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,least-privilege"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apps-to-postgres
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-apps-to-postgres
+    app.kubernetes.io/instance: allow-apps-to-postgres
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "PostgreSQL accepts connections from catalog and order only"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,least-privilege"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: catalog
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cart-to-redis
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-cart-to-redis
+    app.kubernetes.io/instance: allow-cart-to-redis
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Redis accepts connections from cart only"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,least-privilege"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cart
+      ports:
+        - protocol: TCP
+          port: 6379

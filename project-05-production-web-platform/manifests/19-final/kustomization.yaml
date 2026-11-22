@@ -1,0 +1,30 @@
+# 19-final/kustomization.yaml
+# WHY: One declarative end state, and config whose NAME is a hash of its
+#      content — so a change to a dial is a rollout with a revision, not an edit
+#      that reaches pods whenever they happen to restart.
+#
+# Preview:  kubectl kustomize manifests/19-final/
+# Apply:    kubectl apply -k manifests/19-final/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - complete-production-manifest.yaml
+
+generatorOptions:
+  immutable: true
+
+configMapGenerator:
+  - name: webapp-config
+    namespace: web-platform
+    envs:
+      - config/webapp.env
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false     # ⚠️ NEVER true: it would rewrite immutable selectors
+
+images:
+  - name: cloudprakhargupta/web-platform
+    newName: cloudprakhargupta/web-platform

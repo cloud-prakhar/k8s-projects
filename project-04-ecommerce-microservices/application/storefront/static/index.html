@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Shop — Kubernetes Project Lab</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 860px; margin: 2.5rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; margin-bottom: .2rem; }
+  h2 { font-size: 1rem; margin: 1.8rem 0 .5rem; }
+  .sub { font-size: .85rem; color: #64748b; margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .3rem; border-bottom: 1px solid #cbd5e1; vertical-align: top; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  button { padding: .35rem .7rem; border: 0; border-radius: 6px; background: #7c3aed; color: #fff; font: inherit; cursor: pointer; }
+  button.ghost { background: #64748b; }
+  #deps { margin-top: 2rem; padding: .75rem; border-radius: 6px; background: #f1f5f9; color: #0f172a; font: .8rem ui-monospace, monospace; white-space: pre-wrap; }
+  .err { color: #dc2626; font: .85rem ui-monospace, monospace; white-space: pre-wrap; }
+  .ok { color: #16a34a; }
+</style>
+
+<h1>🛒 Shop</h1>
+<p class="sub">
+  Five services: this storefront calls <code>catalog</code>, <code>cart</code> and <code>order</code>;
+  <code>order</code> is the only one allowed to call <code>payment</code>. Watch the dependency box at the
+  bottom — it is how you find which hop a NetworkPolicy just blocked.
+</p>
+
+<h2>Products <span style="font-weight:normal;font-size:.8rem;color:#64748b">— from <code>catalog</code></span></h2>
+<div id="catalog-err" class="err"></div>
+<table>
+  <thead><tr><th>SKU</th><th>Name</th><th class="n">Price</th><th></th></tr></thead>
+  <tbody id="products"><tr><td colspan="4"><em>loading…</em></td></tr></tbody>
+</table>
+
+<h2>Basket <span style="font-weight:normal;font-size:.8rem;color:#64748b">— from <code>cart</code> (Redis)</span></h2>
+<div id="cart-err" class="err"></div>
+<table>
+  <thead><tr><th>SKU</th><th>Name</th><th class="n">Qty</th><th class="n">Line total</th></tr></thead>
+  <tbody id="basket"></tbody>
+</table>
+<p>
+  <button id="checkout">Checkout</button>
+  <button id="clear" class="ghost">Clear basket</button>
+  <span id="checkout-msg"></span>
+</p>
+
+<h2>Recent orders <span style="font-weight:normal;font-size:.8rem;color:#64748b">— from <code>order</code></span></h2>
+<div id="order-err" class="err"></div>
+<table>
+  <thead><tr><th class="n">#</th><th>Payment reference</th><th class="n">Total</th></tr></thead>
+  <tbody id="orders"></tbody>
+</table>
+
+<!-- Which pod served this page, and whether it can reach each upstream. Stage 15
+     is read off this box: a DENIED connection shows as a TIMEOUT, not a refusal,
+     because a dropped packet gets no reply at all. -->
+<div id="deps">loading…</div>
+
+<script>
+// A stable per-browser session id, so the basket survives a reload.
+const SESSION = localStorage.getItem("shop-session")
+  || (localStorage.setItem("shop-session", "s-" + Math.random().toString(36).slice(2, 10)),
+      localStorage.getItem("shop-session"));
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const money = c => "$" + (c / 100).toFixed(2);
+const el = id => document.getElementById(id);
+
+async function jsonOrThrow(r) {
+  if (!r.ok) {
+    const body = await r.text();
+    throw new Error(`HTTP ${r.status}: ${body.slice(0, 300)}`);
+  }
+  return r.json();
+}
+
+async function loadCatalog() {
+  el("catalog-err").textContent = "";
+  try {
+    const products = await jsonOrThrow(await fetch("/api/catalog/products"));
+    el("products").innerHTML = products.map(p =>
+      `<tr><td><code>${esc(p.sku)}</code></td><td>${esc(p.name)}</td>` +
+      `<td class="n">${money(p.price_cents)}</td>` +
+      `<td><button data-sku="${esc(p.sku)}" data-name="${esc(p.name)}" data-price="${p.price_cents}">Add</button></td></tr>`
+    ).join("") || `<tr><td colspan="4"><em>no products</em></td></tr>`;
+    for (const b of el("products").querySelectorAll("button")) b.onclick = addToCart;
+  } catch (e) {
+    el("catalog-err").textContent = "catalog unreachable — " + e.message;
+    el("products").innerHTML = "";
+  }
+}
+
+async function addToCart(ev) {
+  const d = ev.target.dataset;
+  try {
+    await jsonOrThrow(await fetch(`/api/cart/${SESSION}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku: d.sku, name: d.name, price_cents: +d.price, quantity: 1 })
+    }));
+    loadCart();
+  } catch (e) { el("cart-err").textContent = "cart unreachable — " + e.message; }
+}
+
+async function loadCart() {
+  el("cart-err").textContent = "";
+  try {
+    const cart = await jsonOrThrow(await fetch(`/api/cart/${SESSION}`));
+    el("basket").innerHTML = cart.items.map(i =>
+      `<tr><td><code>${esc(i.sku)}</code></td><td>${esc(i.name)}</td>` +
+      `<td class="n">${i.quantity}</td><td class="n">${money(i.price_cents * i.quantity)}</td></tr>`
+    ).join("") || `<tr><td colspan="4"><em>basket is empty</em></td></tr>`;
+    if (cart.items.length) {
+      el("basket").innerHTML +=
+        `<tr><td colspan="3"><strong>Total</strong></td><td class="n"><strong>${money(cart.total_cents)}</strong></td></tr>`;
+    }
+  } catch (e) {
+    el("cart-err").textContent = "cart unreachable — " + e.message;
+    el("basket").innerHTML = "";
+  }
+}
+
+async function loadOrders() {
+  el("order-err").textContent = "";
+  try {
+    const orders = await jsonOrThrow(await fetch("/api/orders"));
+    el("orders").innerHTML = orders.map(o =>
+      `<tr><td class="n">${o.id}</td><td><code>${esc(o.payment_ref)}</code></td>` +
+      `<td class="n">${money(o.total_cents)}</td></tr>`
+    ).join("") || `<tr><td colspan="3"><em>no orders yet</em></td></tr>`;
+  } catch (e) {
+    el("order-err").textContent = "order unreachable — " + e.message;
+    el("orders").innerHTML = "";
+  }
+}
+
+el("checkout").onclick = async () => {
+  const msg = el("checkout-msg");
+  msg.textContent = " placing…"; msg.className = "";
+  try {
+    const cart = await jsonOrThrow(await fetch(`/api/cart/${SESSION}`));
+    if (!cart.items.length) { msg.textContent = " basket is empty"; return; }
+    const order = await jsonOrThrow(await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session: SESSION, items: cart.items })
+    }));
+    await fetch(`/api/cart/${SESSION}`, { method: "DELETE" });
+    msg.textContent = ` order #${order.id} placed (${esc(order.payment_ref)})`;
+    msg.className = "ok";
+    loadCart(); loadOrders();
+  } catch (e) {
+    msg.textContent = " checkout failed — " + e.message;
+    msg.className = "err";
+  }
+};
+
+el("clear").onclick = async () => {
+  await fetch(`/api/cart/${SESSION}`, { method: "DELETE" });
+  loadCart();
+};
+
+async function loadDeps() {
+  try {
+    const w = await (await fetch("/whoami")).json();
+    const lines = Object.entries(w.dependencies).map(([name, d]) =>
+      `  ${name.padEnd(9)} ${d.reachable ? "OK " : "XX "} ${d.url}` + (d.error ? `  (${d.error})` : "")
+    ).join("\n");
+    el("deps").textContent =
+      `served by pod : ${w.pod}  (${w.service})\nsession       : ${SESSION}\ndependencies  :\n${lines}`;
+  } catch { el("deps").textContent = "storefront /whoami unavailable"; }
+}
+
+function refresh() { loadCatalog(); loadCart(); loadOrders(); loadDeps(); }
+refresh();
+setInterval(() => { loadDeps(); loadOrders(); }, 5000);
+</script>

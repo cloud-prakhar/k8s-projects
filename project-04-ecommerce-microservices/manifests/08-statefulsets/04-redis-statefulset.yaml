@@ -1,0 +1,94 @@
+# 08-statefulsets/04-redis-statefulset.yaml
+# WHY: Same argument as PostgreSQL: Redis holds baskets that must survive, so it
+#      needs its own claim bound to a stable identity (redis-0), not a Deployment
+#      sharing one claim across however many replicas someone scales it to.
+#
+# WHAT CHANGED from 07-storage/05-redis-deployment.yaml:
+#   kind: StatefulSet, serviceName, volumeClaimTemplates; no `strategy`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "8.2.9"
+  annotations:
+    kubernetes.io/description: "Redis holding session baskets with a TTL"
+    lab.k8s-project/stage: "08-statefulsets"
+    lab.k8s-project/teaches: "statefulset,volumeclaimtemplates"
+spec:
+  serviceName: redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "8.2.9"
+    spec:
+      # Overriding `command` bypasses the image's entrypoint (which normally
+      # drops root → redis), so the user is set explicitly.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: redis
+          image: redis:8.2.9-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              printf 'requirepass %s\nappendonly yes\ndir /data\n' "$REDIS_PASSWORD" > /run/redis/redis.conf
+              exec redis-server /run/redis/redis.conf
+          ports:
+            - name: redis
+              containerPort: 6379
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: rendered-config
+              mountPath: /run/redis
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+      volumes:
+        - name: rendered-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app.kubernetes.io/name: redis
+          app.kubernetes.io/instance: redis
+          app.kubernetes.io/part-of: ecommerce
+      spec:
+        storageClassName: ecommerce-gp3
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

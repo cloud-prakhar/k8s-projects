@@ -1,0 +1,62 @@
+# 05-configmaps/05-order-deployment.yaml
+# WHAT CHANGED from 03-deployments/order-deployment.yaml:
+#   POSTGRES_HOST/PORT/USER, PAYMENT_URL and UPSTREAM_TIMEOUT_SECONDS now come
+#   from the ConfigMap — five literals replaced by one reference.
+#
+# WHAT DELIBERATELY DID NOT CHANGE:
+#   POSTGRES_DB: "orders". Owned config. `catalog` sets `catalog`; this service
+#   sets `orders`; the shared ConfigMap has no opinion, which is exactly right.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: order
+    app.kubernetes.io/instance: order
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Checkout — owns the orders database and is the only caller of payment"
+    lab.k8s-project/stage: "05-configmaps"
+    lab.k8s-project/teaches: "envfrom,shared-vs-owned-config"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order
+      app.kubernetes.io/instance: order
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order
+        app.kubernetes.io/instance: order
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ecommerce
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      containers:
+        - name: order
+          image: cloudprakhargupta/ecommerce:order-1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          env:
+            # --- OWNED: this service's database ------------------------------
+            - name: POSTGRES_DB
+              value: "orders"
+            - name: POSTGRES_PASSWORD
+              value: "dev-password-not-for-production"   # ⚠️ stage 06 fixes this
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"

@@ -1,0 +1,38 @@
+# 15-security/08-allow-order-to-payment.yaml
+# WHY: THE policy this project exists for. Only pods labelled
+#      app.kubernetes.io/name=order may open a connection to payment on 8080.
+#      The rogue pod from stage 04 now gets a TIMEOUT — a denied packet is
+#      DROPPED, not refused — and payment's own /whoami callers_seen counter
+#      stops growing for anyone but order.
+#
+# ⚠️ This trusts a LABEL. Anyone who can create a pod labelled
+#    app.kubernetes.io/name=order in this namespace passes this rule. RBAC on
+#    who may create pods (Project 07) is what makes a label an identity.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-to-payment
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-order-to-payment
+    app.kubernetes.io/instance: allow-order-to-payment
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "payment accepts connections from order pods only"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,least-privilege"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order
+      ports:
+        - protocol: TCP
+          port: 8080

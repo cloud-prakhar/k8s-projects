@@ -1,0 +1,26 @@
+# 07-storage/postgres-data PVC
+# WHY: A claim: "1 GiB, one writer, class ecommerce-gp3". The application asks;
+#      the EBS CSI driver fulfils it with a real encrypted volume in the AZ the
+#      pod lands in. Pending until a pod uses it — that is WaitForFirstConsumer
+#      working, not a failure.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: postgres-data
+    app.kubernetes.io/instance: postgres-data
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Durable storage for postgres"
+    lab.k8s-project/stage: "07-storage"
+    lab.k8s-project/teaches: "pvc,dynamic-provisioning"
+spec:
+  storageClassName: ecommerce-gp3     # ALWAYS name it — EKS has no default class
+  accessModes: [ReadWriteOnce]        # one NODE (not one pod); the only mode EBS supports
+  resources:
+    requests:
+      storage: 1Gi                    # gp3 minimum

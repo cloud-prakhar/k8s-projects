@@ -1,0 +1,5 @@
+# Pinned exactly. Unpinned dependencies make a rebuilt image behave differently
+# from the one you tested — the same reason we never use the :latest image tag.
+flask==3.1.3
+gunicorn==26.2.0
+psycopg[binary]==3.3.5

@@ -1,0 +1,43 @@
+# 15-security/03-allow-internet-to-public-services.yaml
+# WHY: The ALB sends traffic straight to pod IPs (target-type: ip), and its
+#      health checks come from the ALB's own addresses. Deny-all blocked both,
+#      so every path through the ALB returned 5xx.
+#
+# WHY `0.0.0.0/0` AND NOT "THE ALB": on this lab cluster the nodes, the pods and
+# the ALB's network interfaces all sit in the SAME public subnets, so there is
+# no CIDR that means "the ALB and nothing else". These four services are public
+# by design — the Ingress already exposes them — so admitting any source on
+# 8080 grants nothing the internet does not have. The services that are NOT
+# public (payment, postgres, redis) get no such rule.
+#
+# 🏭 Production: private node subnets, and the ALB's security group as the
+#    control for north-south traffic (or an ipBlock of the ALB subnets only).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-to-public-services
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: allow-internet-to-public-services
+    app.kubernetes.io/instance: allow-internet-to-public-services
+    app.kubernetes.io/part-of: ecommerce
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes.io/description: "Admit port 8080 to the four ALB-exposed services from any source"
+    lab.k8s-project/stage: "15-security"
+    lab.k8s-project/teaches: "networkpolicy,ingress,ipblock"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [storefront, catalog, cart, order]     # NOT payment
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 8080
