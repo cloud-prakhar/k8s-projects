@@ -1,8 +1,8 @@
 # 03 · Images & Container Runtime
 
-[⬅ Module 1](README.md) · Page 3 of 5 · [🏠 Reference home](../README.md)
+[⬅ Module 1](README.md) · Page 3 of 6 · [🏠 Reference home](../README.md)
 
-[01 Fundamentals](01-kubernetes-fundamentals.md) › [02 Architecture](02-kubernetes-architecture.md) › **03 Images & Runtime** › [04 API Resources](04-api-resources-and-object-definitions.md) › [05 HA Control Plane](05-high-availability-control-plane.md)
+[01 Fundamentals](01-kubernetes-fundamentals.md) › [02 Architecture](02-kubernetes-architecture.md) › **03 Images & Runtime** › [04 API Resources](04-api-resources-and-object-definitions.md) › [05 HA Control Plane](05-high-availability-control-plane.md) › [06 Networking & IPs](06-cluster-networking-and-ip-allocation.md)
 
 ---
 

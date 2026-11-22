@@ -1,8 +1,8 @@
 # 01 · Kubernetes Fundamentals
 
-[⬅ Module 1](README.md) · Page 1 of 5 · [🏠 Reference home](../README.md)
+[⬅ Module 1](README.md) · Page 1 of 6 · [🏠 Reference home](../README.md)
 
-**01 Fundamentals** › [02 Architecture](02-kubernetes-architecture.md) › [03 Images & Runtime](03-images-and-container-runtime.md) › [04 API Resources](04-api-resources-and-object-definitions.md) › [05 HA Control Plane](05-high-availability-control-plane.md)
+**01 Fundamentals** › [02 Architecture](02-kubernetes-architecture.md) › [03 Images & Runtime](03-images-and-container-runtime.md) › [04 API Resources](04-api-resources-and-object-definitions.md) › [05 HA Control Plane](05-high-availability-control-plane.md) › [06 Networking & IPs](06-cluster-networking-and-ip-allocation.md)
 
 ---
 

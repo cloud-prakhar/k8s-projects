@@ -8,7 +8,7 @@ reason to exist, chosen so that the Kubernetes resource it teaches is *genuinely
 | 01 | [`project-01-task-tracker-webapp`](../project-01-task-tracker-webapp/) ✅ | 🟢 Beginner | single-node | 3–4 h |
 | 02 | [`project-02-three-tier-notes`](../project-02-three-tier-notes/) ✅ | 🟢 Beginner+ | ingress | 4–5 h |
 | 03 | [`project-03-url-shortener`](../project-03-url-shortener/) ✅ | 🟡 Intermediate | **AWS EKS** | 4–5 h + ~$1–2 |
-| 04 | `project-04-ecommerce-microservices` | 🟡 Intermediate | ingress | 5–6 h |
+| 04 | [`project-04-ecommerce-microservices`](../project-04-ecommerce-microservices/) ✅ | 🟡 Intermediate | **AWS EKS** | 5–6 h + ~$2 |
 | 05 | `project-05-production-web-platform` | 🟡 Intermediate+ | multi-node | 5–6 h |
 | 06 | `project-06-batch-processing-platform` | 🟡 Intermediate+ | ingress | 4–5 h |
 | 07 | `project-07-secure-multi-tenant-platform` | 🔴 Advanced | multi-node | 5–6 h |
@@ -115,6 +115,10 @@ ExternalName pointing nowhere, cache/DB inconsistency, and how an ALB gets orpha
 ---
 
 ## Project 04 — E-Commerce Microservices
+
+> ✅ **Built** — [`project-04-ecommerce-microservices/`](../project-04-ecommerce-microservices/). **Runs on AWS EKS**
+> ([`clusters/eks-advanced.yaml`](../clusters/eks-advanced.yaml)) with the VPC CNI's NetworkPolicy enforcement turned
+> on, so a default-deny policy really blocks traffic instead of being silently ignored.
 
 **Application:** Storefront + `catalog`, `cart`, `order`, `payment` services, Postgres, Redis. Services call each
 other over cluster DNS — this is the first project with real **east-west** traffic.

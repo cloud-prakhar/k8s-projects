@@ -6,9 +6,10 @@ Every project starts with a working application and a plain `kubectl run`-level 
 resources **one at a time, only when the application actually breaks without them**.
 
 > **Status:** Repository design complete. **[Project 01](project-01-task-tracker-webapp/)** (the reference
-> implementation every later project mirrors), **[Project 02](project-02-three-tier-notes/)** and
-> **[Project 03](project-03-url-shortener/)** (on AWS EKS) are built. Projects 04–10 are next — see
-> [docs/ROADMAP.md](docs/ROADMAP.md).
+> implementation every later project mirrors), **[Project 02](project-02-three-tier-notes/)**,
+> **[Project 03](project-03-url-shortener/)** and **[Project 04](project-04-ecommerce-microservices/)** (both on AWS
+> EKS) are built. Project 05 is in progress; 06–10 are next — see [docs/ROADMAP.md](docs/ROADMAP.md).
+> New to Kubernetes? Read the **[Kubernetes Document Reference](kubernetes-document-reference/)** first.
 
 ---
 
@@ -44,6 +45,8 @@ cd project-01-task-tracker-webapp && cat README.md
 | **Start learning** | [Project 01](project-01-task-tracker-webapp/) — everything you need is inside it |
 | Learn storage, StatefulSets and Ingress | [Project 02](project-02-three-tier-notes/) — do Project 01 first |
 | Learn DNS, per-pod identity and immutable config — on AWS EKS | [Project 03](project-03-url-shortener/) — costs ~$1–2; do Project 02 first |
+| Learn Ingress routing, east-west traffic and NetworkPolicy — on AWS EKS | [Project 04](project-04-ecommerce-microservices/) — costs ~$2; do Project 03 first |
+| Read the fundamentals first (architecture, objects, networking basics) | [Kubernetes Document Reference](kubernetes-document-reference/) — two beginner modules |
 | Type every command myself, explained | that project's [`scripts/manual-steps.md`](project-01-task-tracker-webapp/scripts/manual-steps.md) |
 | See which project teaches what | [Resource coverage matrix](docs/RESOURCE-COVERAGE-MATRIX.md) |
 | Understand the project line-up | [Roadmap](docs/ROADMAP.md) |
@@ -136,7 +139,7 @@ Do the projects in order the first time. After that, each one stands alone as a 
 | 01 | [**Task Tracker Web App** ✅](project-01-task-tracker-webapp/) | Beginner | Python web tier + REST API | Namespace, Pod, ReplicaSet, Deployment, Service, ConfigMap, Secret |
 | 02 | [**Three-Tier Notes Platform** ✅](project-02-three-tier-notes/) | Beginner+ | Frontend + API + PostgreSQL | PV, PVC, StorageClass, StatefulSet, headless Service, Ingress, IngressClass, NodePort, LoadBalancer, probes, init containers |
 | 03 | [**URL Shortener** ✅](project-03-url-shortener/) | Intermediate · **EKS** | UI + API + Redis primary/replica + Postgres | CoreDNS & search lists, ExternalName, headless Service & per-pod DNS, immutable ConfigMaps, EBS CSI, ALB Ingress, init-container migrations |
-| 04 | [E-Commerce Microservices](docs/ROADMAP.md#project-04--e-commerce-microservices) | Intermediate | 5 services + gateway | Ingress path/host routing, NetworkPolicy, east-west traffic, EndpointSlice |
+| 04 | [**E-Commerce Microservices** ✅](project-04-ecommerce-microservices/) | Intermediate · **EKS** | 5 services + gateway | Ingress path/host routing, NetworkPolicy, east-west traffic, EndpointSlice |
 | 05 | [Production Web Platform](docs/ROADMAP.md#project-05--production-web-platform) | Intermediate+ | Traffic-serving web app | requests/limits, QoS, HPA, PDB, rolling update, rollback, preStop, graceful shutdown |
 | 06 | [Batch Processing Platform](docs/ROADMAP.md#project-06--batch-processing-platform) | Intermediate+ | API + workers + scheduled cleanup | Job, CronJob, init containers, sidecars, Downward API, backoff/TTL |
 | 07 | [Secure Multi-Tenant Platform](docs/ROADMAP.md#project-07--secure-multi-tenant-platform) | Advanced | Tenant-isolated app | RBAC, ServiceAccount, securityContext, PSS, ResourceQuota, LimitRange, NetworkPolicy |
@@ -153,7 +156,7 @@ Do the projects in order the first time. After that, each one stands alone as a 
 | **Kind** | Primary | Every project is authored and validated against Kind |
 | Minikube | Supported | Differences flagged inline (Ingress addon, `minikube tunnel`, storage class names) |
 | k3d / k3s | Best effort | Uses Traefik + local-path by default; substitutions documented |
-| AWS EKS | **Project 03** and Project 10, + optional sections | Real ALB, EBS, Pod Identity; `clusters/eks-lab.yaml` |
+| AWS EKS | **Projects 03 and 04**, Project 10, + optional sections | Real ALB, EBS, Pod Identity; `clusters/eks-lab.yaml` (P03), `clusters/eks-advanced.yaml` (P04, with NetworkPolicy enforcement) |
 | Azure AKS / Google GKE | Concept notes | Behavioural differences called out; not the primary path |
 
 > **Important:** `type: LoadBalancer` does **not** give you a public IP on every cluster. On Kind it stays `<pending>`
@@ -181,9 +184,10 @@ kubernetes-project-lab/
 │   ├── storage-basics.md
 │   ├── security-basics.md
 │   └── troubleshooting-guide.md
+├── kubernetes-document-reference/   # beginner reference: 2 modules + glossary
 ├── templates/
 │   └── project-template/            # copy this to start a new project
-├── clusters/                        # reusable Kind cluster configs
+├── clusters/                        # reusable Kind + EKS cluster configs
 └── project-01-…  …  project-10-…    # the projects
 ```
 

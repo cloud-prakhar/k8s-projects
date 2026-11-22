@@ -489,7 +489,7 @@ Everything above is self-contained — these are for going deeper, not for filli
 | Reference | What it adds |
 |---|---|
 | [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/) | Every way to consume one, immutability, and the update semantics |
-| [Configure a Pod to Use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-configmap/) | `envFrom`, `configMapKeyRef` and volume mounts, with worked examples |
+| [Configure a Pod to Use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/) | `envFrom`, `configMapKeyRef` and volume mounts, with worked examples |
 | [Deployments — rolling update](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) | Why a pod-template change is what actually triggers a rollout |
 | [configMapGenerator](https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/configmapgenerator/) | The production answer to the "edit does nothing" problem |
 

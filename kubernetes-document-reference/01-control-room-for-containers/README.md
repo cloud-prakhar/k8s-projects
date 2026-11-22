@@ -46,6 +46,7 @@ flowchart LR
 | 03 | [Images & Container Runtime](03-images-and-container-runtime.md) | How does an image become a running container on a node? | 25 min |
 | 04 | [API Resources & Object Definitions](04-api-resources-and-object-definitions.md) | How do I read and write any Kubernetes YAML? | 30 min |
 | 05 | [High-Availability (Multi-Master) Control Plane](05-high-availability-control-plane.md) | How do several control-plane nodes elect leaders and keep etcd consistent? | 40 min |
+| 06 | [Cluster Networking & IP Allocation](06-cluster-networking-and-ip-allocation.md) | Who gives IPs to nodes, control-plane Pods, CoreDNS and Services, on Kind, kubeadm and EKS? | 35 min |
 
 ## By the end of this module you can…
 
@@ -57,6 +58,8 @@ flowchart LR
 - Use `kubectl api-resources` and `kubectl explain` to discover things on your own.
 - Explain how a multi-master control plane works: active-active API servers, Lease-based leader election, and etcd
   quorum with Raft.
+- Explain where node, Pod and Service IPs come from on Kind, kubeadm and EKS, and why control-plane Pods show the
+  node's IP.
 
 ---
 

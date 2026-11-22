@@ -185,7 +185,7 @@ Everything above is self-contained — these are for going deeper, not for filli
 | Reference | What it adds |
 |---|---|
 | [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/) | Consumption and update semantics |
-| [Configure a Pod to Use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-configmap/) | `envFrom` worked through |
+| [Configure a Pod to Use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/) | `envFrom` worked through |
 
 ---
 

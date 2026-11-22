@@ -1,8 +1,8 @@
 # 05 · High-Availability (Multi-Master) Control Plane
 
-[⬅ Module 1](README.md) · Page 5 of 5 · [🏠 Reference home](../README.md)
+[⬅ Module 1](README.md) · Page 5 of 6 · [🏠 Reference home](../README.md)
 
-[01 Fundamentals](01-kubernetes-fundamentals.md) › [02 Architecture](02-kubernetes-architecture.md) › [03 Images & Runtime](03-images-and-container-runtime.md) › [04 API Resources](04-api-resources-and-object-definitions.md) › **05 HA Control Plane**
+[01 Fundamentals](01-kubernetes-fundamentals.md) › [02 Architecture](02-kubernetes-architecture.md) › [03 Images & Runtime](03-images-and-container-runtime.md) › [04 API Resources](04-api-resources-and-object-definitions.md) › **05 HA Control Plane** › [06 Networking & IPs](06-cluster-networking-and-ip-allocation.md)
 
 ---
 
@@ -490,9 +490,9 @@ rm kind-ha.yaml
 - Topologies: **stacked** (etcd on the control-plane nodes, 3 machines) or **external** (separate etcd, 6+ machines).
 - On EKS/AKS/GKE, the provider does all of this for you.
 
-**🎉 Module 1 complete.** You know *what* Kubernetes is, *who* does what inside it, *how* containers start, *how* to
-read any object, and *how* the control plane itself survives failures. Now let's deploy an app, the Kubernetes way.
-→ [Module 2 · 01 Namespaces](../02-deploy-apps-the-kubernetes-way/01-namespaces.md)
+**Next question:** the control-plane Pods in this lab showed the **node's** IP, while CoreDNS and your apps showed
+completely different addresses. Who hands out all these IPs: for nodes, Pods, CoreDNS and Services? →
+[06 · Cluster Networking & IP Allocation](06-cluster-networking-and-ip-allocation.md)
 
 ---
 
@@ -515,4 +515,4 @@ Everything above is self-contained. These links are for going deeper, not for fi
 
 | ◀ Previous | ▲ Up | Next ▶ |
 |---|:--:|---:|
-| ◀ **[04 API Resources](04-api-resources-and-object-definitions.md)** | [Module 1](README.md) · [🏠 Reference home](../README.md) | **[Module 2 · 01 Namespaces](../02-deploy-apps-the-kubernetes-way/01-namespaces.md)** ▶ |
+| ◀ **[04 API Resources](04-api-resources-and-object-definitions.md)** | [Module 1](README.md) · [🏠 Reference home](../README.md) | **[06 Networking & IPs](06-cluster-networking-and-ip-allocation.md)** ▶ |

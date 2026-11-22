@@ -5,9 +5,10 @@ Reusable cluster definitions. Each project's README states which one it needs.
 | Config | Platform | Nodes | Ports 80/443 | Zones | Used by |
 |---|---|---|---|---|---|
 | [`kind-single-node.yaml`](kind-single-node.yaml) | Kind | 1 (control-plane) | ❌ | ❌ | P01 |
-| [`kind-ingress.yaml`](kind-ingress.yaml) | Kind | 2 (cp + worker) | ✅ | ❌ | P02, P04, P06 |
-| [`kind-multi-node.yaml`](kind-multi-node.yaml) | Kind | 4 (cp + 3 workers) | ✅ | ✅ labels `zone-a/b/c` | P05, P07, P08, P09 |
+| [`kind-ingress.yaml`](kind-ingress.yaml) | Kind | 2 (cp + worker) | ✅ | ❌ | P02, P06 |
+| [`kind-multi-node.yaml`](kind-multi-node.yaml) | Kind | 4 (cp + 3 workers) | ✅ | ✅ labels `zone-a/b/c` | P07, P08, P09 |
 | [`eks-lab.yaml`](eks-lab.yaml) | **AWS EKS** (eksctl) | 2 × t3.medium managed | via ALB | ✅ real AZs | **P03** |
+| [`eks-advanced.yaml`](eks-advanced.yaml) | **AWS EKS** (eksctl) | 3 × t3.medium managed · VPC CNI NetworkPolicy on · Metrics Server | via ALB | ✅ real AZs | **P04**, P05 (in progress) |
 
 The Kind configs use the cluster name `kubernetes-lab` (context `kind-kubernetes-lab`). The EKS config also uses
 `kubernetes-lab` (context `<user>@kubernetes-lab.<region>.eksctl.io`).
